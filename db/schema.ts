@@ -60,6 +60,51 @@ export const messages = sqliteTable('messages', {
   sourceClassification: text('source_classification'),
 });
 
+export const labels = sqliteTable('labels', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  color: text('color'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const messageLabels = sqliteTable('message_labels', {
+  messageId: text('message_id').references(() => messages.id).notNull(),
+  labelId: text('label_id').references(() => labels.id).notNull(),
+});
+
+export const sourceProfiles = sqliteTable('source_profiles', {
+  id: text('id').primaryKey(),
+  companyId: text('company_id').references(() => companies.id),
+  contactId: text('contact_id').references(() => contacts.id),
+  platform: text('platform').notNull(), // e.g., 'linkedin', 'twitter', 'github'
+  url: text('url').notNull(),
+  handle: text('handle'),
+  scrapedData: text('scraped_data'), // JSON
+  lastScrapedAt: integer('last_scraped_at', { mode: 'timestamp' }),
+});
+
+export const entityLinks = sqliteTable('entity_links', {
+  id: text('id').primaryKey(),
+  sourceType: text('source_type').notNull(), // e.g., 'message', 'evidence', 'task'
+  sourceId: text('source_id').notNull(),
+  targetType: text('target_type').notNull(), // e.g., 'company', 'contact'
+  targetId: text('target_id').notNull(),
+  relationship: text('relationship'), // e.g., 'mentions', 'belongs_to'
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const tags = sqliteTable('tags', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  color: text('color'),
+});
+
+export const entityTags = sqliteTable('entity_tags', {
+  entityType: text('entity_type').notNull(), // e.g., 'company', 'contact', 'message'
+  entityId: text('entity_id').notNull(),
+  tagId: text('tag_id').references(() => tags.id).notNull(),
+});
+
 export const browserTabs = sqliteTable('browser_tabs', {
   id: text('id').primaryKey(),
   sessionPartition: text('session_partition').notNull(),

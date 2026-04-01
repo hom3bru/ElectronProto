@@ -13,5 +13,5 @@
       "@/*": ["./*"]
     }
   },
-  "include": ["main/**/*", "db/**/*", "packages/**/*"]
+  "include": ["main/**/*", "db/**/*", "packages/**/*", "shared/**/*"]
 }

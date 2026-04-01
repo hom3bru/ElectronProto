@@ -11,7 +11,7 @@ export default function EvidencePage() {
 
   useEffect(() => {
     if (electron) {
-      electron.db.getEvidence().then(setEvidence);
+      electron.db.query('evidenceFragments', 'findMany', { orderBy: { timestamp: 'desc' } }).then(setEvidence);
     }
   }, [electron]);
 
@@ -35,7 +35,7 @@ export default function EvidencePage() {
               <p className="text-sm text-zinc-200 mb-4">{item.claimSummary}</p>
               {item.quote && (
                 <blockquote className="border-l-2 border-zinc-700 pl-4 py-1 text-sm text-zinc-400 italic mb-4">
-                  "{item.quote}"
+                  &quot;{item.quote}&quot;
                 </blockquote>
               )}
               <div className="flex items-center gap-4 text-xs text-zinc-500">

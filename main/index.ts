@@ -1,4 +1,4 @@
-import { app, BrowserWindow, BaseWindow, WebContentsView, ipcMain } from 'electron';
+import { app, BrowserWindow, BaseWindow, WebContentsView } from 'electron';
 import * as path from 'path';
 import { setupIpcHandlers } from './ipc';
 import { BrowserManager } from './browser-manager';
@@ -10,9 +10,10 @@ let browserManager: BrowserManager | null = null;
 
 async function createWindow() {
   mainWindow = new BaseWindow({
-    width: 1280,
-    height: 800,
+    width: 1440,
+    height: 900,
     title: 'Internal Agent Workspace',
+    backgroundColor: '#09090b', // zinc-950
   });
 
   const uiView = new WebContentsView({
@@ -24,12 +25,14 @@ async function createWindow() {
   });
 
   mainWindow.contentView.addChildView(uiView);
-  uiView.setBounds({ x: 0, y: 0, width: 1280, height: 800 });
-
-  mainWindow.on('resize', () => {
+  
+  const resizeUI = () => {
     const bounds = mainWindow!.getBounds();
     uiView.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height });
-  });
+  };
+  
+  resizeUI();
+  mainWindow.on('resize', resizeUI);
 
   if (isDev) {
     uiView.webContents.loadURL('http://localhost:3000');

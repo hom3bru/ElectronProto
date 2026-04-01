@@ -26,6 +26,7 @@ export class BrowserManager {
     this.views.set(id, view);
     view.webContents.loadURL(url);
 
+    // Event capture
     view.webContents.on('did-finish-load', () => {
       notifyRenderer('tab-updated', { id, loadingState: false });
     });

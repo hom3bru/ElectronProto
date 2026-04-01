@@ -3,40 +3,60 @@
 import { useEffect, useState } from 'react';
 import { Message } from '@/packages/shared/types';
 import { format } from 'date-fns';
-import { Mail, Reply, Archive, Tag, AlertCircle } from 'lucide-react';
+import { Mail, Reply, Archive, Tag, AlertCircle, RefreshCw } from 'lucide-react';
 
 export default function InboxPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+  const [isIngesting, setIsIngesting] = useState(false);
 
   const electron = typeof window !== 'undefined' ? (window as any).electron : null;
 
   useEffect(() => {
-    if (electron) {
-      electron.db.getInboxItems().then(setMessages);
-    } else {
-      setMessages([
-        {
-          id: '1',
-          from: 'founder@acme.com',
-          to: 'agent@internal.com',
-          subject: 'Interested in your product',
-          snippet: 'Hi, we are looking for a solution...',
-          plainTextBody: 'Hi, we are looking for a solution to our problem. Can we chat?',
-          receivedAt: new Date(),
-          readState: false,
-          routeStatus: 'candidate',
-        } as Message
-      ]);
-    }
+    const loadMessages = async () => {
+      if (electron) {
+        const msgs = await electron.db.query('messages', 'findMany', {});
+        setMessages(msgs);
+      }
+    };
+    loadMessages();
   }, [electron]);
+
+  const handleIngest = async () => {
+    if (!electron) return;
+    setIsIngesting(true);
+    await electron.cmd.execute('ingestMail', {});
+    const msgs = await electron.db.query('messages', 'findMany', {});
+    setMessages(msgs);
+    setIsIngesting(false);
+  };
+
+  const handleAction = async (command: string, payload: any) => {
+    if (!electron) return;
+    await electron.cmd.execute(command, payload);
+    const msgs = await electron.db.query('messages', 'findMany', {});
+    setMessages(msgs);
+    if (selectedMessage) {
+      const updated = await electron.db.query('messages', 'findById', { id: selectedMessage.id });
+      setSelectedMessage(updated);
+    }
+    alert(`Executed ${command}`);
+  };
 
   return (
     <div className="flex h-full">
       {/* Message List */}
       <div className="w-80 border-r border-zinc-800 flex flex-col bg-zinc-950 shrink-0">
-        <div className="p-4 border-b border-zinc-800">
+        <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
           <h2 className="text-sm font-semibold">Inbox</h2>
+          <button 
+            onClick={handleIngest} 
+            disabled={isIngesting}
+            className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-md transition-colors"
+            title="Fetch Mail"
+          >
+            <RefreshCw className={`w-4 h-4 ${isIngesting ? 'animate-spin' : ''}`} />
+          </button>
         </div>
         <div className="flex-1 overflow-y-auto">
           {messages.map((msg) => (
@@ -58,6 +78,11 @@ export default function InboxPage() {
               )}
             </div>
           ))}
+          {messages.length === 0 && (
+            <div className="p-4 text-center text-sm text-zinc-500">
+              No messages. Click refresh to ingest mock mail.
+            </div>
+          )}
         </div>
       </div>
 
@@ -78,7 +103,11 @@ export default function InboxPage() {
                 <button className="p-2 bg-zinc-900 hover:bg-zinc-800 rounded-md text-zinc-400 hover:text-zinc-100 transition-colors">
                   <Reply className="w-4 h-4" />
                 </button>
-                <button className="p-2 bg-zinc-900 hover:bg-zinc-800 rounded-md text-zinc-400 hover:text-zinc-100 transition-colors">
+                <button 
+                  onClick={() => handleAction('markMessageIgnored', { messageId: selectedMessage.id })}
+                  className="p-2 bg-zinc-900 hover:bg-zinc-800 rounded-md text-zinc-400 hover:text-zinc-100 transition-colors"
+                  title="Ignore"
+                >
                   <Archive className="w-4 h-4" />
                 </button>
                 <button className="p-2 bg-zinc-900 hover:bg-zinc-800 rounded-md text-zinc-400 hover:text-zinc-100 transition-colors">
@@ -92,16 +121,28 @@ export default function InboxPage() {
             
             {/* Action Bar */}
             <div className="p-4 border-t border-zinc-800 bg-zinc-900 flex gap-3 shrink-0">
-              <button className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-md text-sm font-medium transition-colors">
-                Link to Company
+              <button 
+                onClick={() => handleAction('createCompanyFromMessage', { messageId: selectedMessage.id, name: selectedMessage.from, domain: selectedMessage.from.split('@')[1] })}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-md text-sm font-medium transition-colors"
+              >
+                Create Company
               </button>
-              <button className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-md text-sm font-medium transition-colors">
-                Create Evidence Fragment
+              <button 
+                onClick={() => handleAction('createEvidenceFromMessage', { messageId: selectedMessage.id, claimSummary: 'Evidence from email' })}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-md text-sm font-medium transition-colors"
+              >
+                Extract Evidence
               </button>
-              <button className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-md text-sm font-medium transition-colors">
-                Draft Outreach
+              <button 
+                onClick={() => handleAction('createTask', { title: `Follow up with ${selectedMessage.from}`, type: 'follow-up', relatedEntityType: 'message', relatedEntityId: selectedMessage.id })}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-md text-sm font-medium transition-colors"
+              >
+                Create Task
               </button>
-              <button className="px-4 py-2 bg-red-950/30 text-red-400 hover:bg-red-900/50 rounded-md text-sm font-medium transition-colors ml-auto flex items-center gap-2">
+              <button 
+                onClick={() => handleAction('escalateMessage', { messageId: selectedMessage.id, reason: 'Manual escalation from inbox' })}
+                className="px-4 py-2 bg-red-950/30 text-red-400 hover:bg-red-900/50 rounded-md text-sm font-medium transition-colors ml-auto flex items-center gap-2"
+              >
                 <AlertCircle className="w-4 h-4" />
                 Escalate
               </button>

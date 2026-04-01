@@ -1,5 +1,5 @@
 {
-  "name": "",
-  "description": "",
+  "name": "Internal Agent Workspace",
+  "description": "A local-first Electron desktop application combining a Chromium browser, inbox, CRM, and task management.",
   "requestFramePermissions": []
 }

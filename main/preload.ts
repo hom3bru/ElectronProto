@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('electron', {
   browser: {
     createTab: (partition: string, url: string) => ipcRenderer.invoke('browser:createTab', { partition, url }),
+    restoreTab: (id: string, partition: string, url: string) => ipcRenderer.invoke('browser:restoreTab', { id, partition, url }),
     switchTab: (id: string) => ipcRenderer.invoke('browser:switchTab', id),
     closeTab: (id: string) => ipcRenderer.invoke('browser:closeTab', id),
     setBounds: (bounds: any) => ipcRenderer.invoke('browser:setBounds', bounds),
@@ -11,21 +12,15 @@ contextBridge.exposeInMainWorld('electron', {
     goForward: (id: string) => ipcRenderer.invoke('browser:goForward', id),
     reload: (id: string) => ipcRenderer.invoke('browser:reload', id),
     onTabUpdated: (callback: (data: any) => void) => {
-      ipcRenderer.on('tab-updated', (e, data) => callback(data));
+      const listener = (e: any, data: any) => callback(data);
+      ipcRenderer.on('tab-updated', listener);
+      return () => ipcRenderer.removeListener('tab-updated', listener);
     },
   },
-  db: {
-    getTabs: () => ipcRenderer.invoke('db:getTabs'),
-    getCompanies: () => ipcRenderer.invoke('db:getCompanies'),
-    getInboxItems: () => ipcRenderer.invoke('db:getInboxItems'),
-    getTasks: () => ipcRenderer.invoke('db:getTasks'),
-    getEvidence: () => ipcRenderer.invoke('db:getEvidence'),
-    getNotebook: () => ipcRenderer.invoke('db:getNotebook'),
-    getDrafts: () => ipcRenderer.invoke('db:getDrafts'),
-  },
   cmd: {
-    createCompany: (data: any) => ipcRenderer.invoke('cmd:createCompany', data),
-    createTask: (data: any) => ipcRenderer.invoke('cmd:createTask', data),
-    createEvidence: (data: any) => ipcRenderer.invoke('cmd:createEvidence', data),
+    execute: (commandName: string, payload: any) => ipcRenderer.invoke('cmd:execute', { commandName, payload }),
+  },
+  db: {
+    query: (model: string, action: string, args: any) => ipcRenderer.invoke('db:query', { model, action, args }),
   }
 });
