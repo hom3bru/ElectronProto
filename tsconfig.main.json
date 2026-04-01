@@ -11,7 +11,21 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"]
-    }
+    },
+    "types": ["node"]
   },
-  "include": ["main/**/*", "db/**/*", "packages/**/*", "shared/**/*"]
+  "include": [
+    "main/**/*.ts", 
+    "db/**/*.ts", 
+    "packages/commands/**/*.ts", 
+    "packages/shared/**/*.ts", 
+    "shared/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "app",
+    "components",
+    "out",
+    ".next"
+  ]
 }

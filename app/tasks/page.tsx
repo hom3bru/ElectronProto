@@ -12,7 +12,7 @@ export default function TasksPage() {
   useEffect(() => {
     const loadTasks = async () => {
       if (electron) {
-        const tsks = await electron.db.query('tasks', 'findMany', { orderBy: { createdAt: 'desc' } });
+        const tsks = await electron.tasks.getTasks();
         setTasks(tsks);
       }
     };
@@ -22,7 +22,7 @@ export default function TasksPage() {
   const handleUpdateStatus = async (taskId: string, status: string) => {
     if (!electron) return;
     await electron.cmd.execute('updateTaskStatus', { taskId, status });
-    const tsks = await electron.db.query('tasks', 'findMany', { orderBy: { createdAt: 'desc' } });
+    const tsks = await electron.tasks.getTasks();
     setTasks(tsks);
   };
 

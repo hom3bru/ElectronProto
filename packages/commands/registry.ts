@@ -226,8 +226,15 @@ export class CommandRegistry {
 
       case 'sendDraft': {
         const { draftId } = payload;
+        const [draft] = await db.select().from(schema.drafts).where(eq(schema.drafts.id, draftId));
         await db.update(schema.drafts).set({ status: 'sent', sentAt: new Date(), updatedAt: new Date() }).where(eq(schema.drafts.id, draftId));
-        await this.logNotebookEntry('draft', draftId, 'sent', `Draft sent`, 'agent', 'System');
+        await this.logNotebookEntry('draft', draftId, 'sent', `Outbound outreach sent: ${draft?.subject}`, 'agent', 'System');
+        return { success: true };
+      }
+
+      case 'markThreadRead': {
+        const { threadId } = payload;
+        await db.update(schema.messages).set({ readState: true }).where(eq(schema.messages.threadId, threadId));
         return { success: true };
       }
 

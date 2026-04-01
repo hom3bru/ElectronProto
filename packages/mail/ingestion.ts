@@ -58,7 +58,7 @@ export class MailIngestionService {
         readState: false,
         routeStatus,
         sourceClassification: 'inbound_email',
-      });
+      }).onConflictDoNothing({ target: schema.messages.providerId });
 
       // Update thread timestamp
       await db.update(schema.threads)

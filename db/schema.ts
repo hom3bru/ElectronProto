@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, index, primaryKey } from 'drizzle-orm/sqlite-core';
 
 export const companies = sqliteTable('companies', {
   id: text('id').primaryKey(),
@@ -41,7 +41,7 @@ export const threads = sqliteTable('threads', {
 
 export const messages = sqliteTable('messages', {
   id: text('id').primaryKey(),
-  providerId: text('provider_id'),
+  providerId: text('provider_id').unique(),
   threadId: text('thread_id').references(() => threads.id),
   mailboxId: text('mailbox_id'),
   from: text('from').notNull(),
@@ -54,7 +54,7 @@ export const messages = sqliteTable('messages', {
   htmlBody: text('html_body'),
   receivedAt: integer('received_at', { mode: 'timestamp' }).notNull(),
   readState: integer('read_state', { mode: 'boolean' }).default(false),
-  labels: text('labels', { mode: 'json' }),
+  labels: text('labels', { mode: 'json' }), // DEPRECATED: use messageLabels join table
   routeStatus: text('route_status'),
   trustScore: real('trust_score'),
   sourceClassification: text('source_classification'),
@@ -70,7 +70,9 @@ export const labels = sqliteTable('labels', {
 export const messageLabels = sqliteTable('message_labels', {
   messageId: text('message_id').references(() => messages.id).notNull(),
   labelId: text('label_id').references(() => labels.id).notNull(),
-});
+}, (t) => ({
+  pk: primaryKey({ columns: [t.messageId, t.labelId] }),
+}));
 
 export const sourceProfiles = sqliteTable('source_profiles', {
   id: text('id').primaryKey(),
@@ -91,7 +93,10 @@ export const entityLinks = sqliteTable('entity_links', {
   targetId: text('target_id').notNull(),
   relationship: text('relationship'), // e.g., 'mentions', 'belongs_to'
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
-});
+}, (t) => ({
+  sourceIdx: index('entity_links_source_idx').on(t.sourceType, t.sourceId),
+  targetIdx: index('entity_links_target_idx').on(t.targetType, t.targetId),
+}));
 
 export const tags = sqliteTable('tags', {
   id: text('id').primaryKey(),
@@ -103,7 +108,9 @@ export const entityTags = sqliteTable('entity_tags', {
   entityType: text('entity_type').notNull(), // e.g., 'company', 'contact', 'message'
   entityId: text('entity_id').notNull(),
   tagId: text('tag_id').references(() => tags.id).notNull(),
-});
+}, (t) => ({
+  pk: primaryKey({ columns: [t.entityType, t.entityId, t.tagId] }),
+}));
 
 export const browserTabs = sqliteTable('browser_tabs', {
   id: text('id').primaryKey(),
@@ -160,6 +167,7 @@ export const tasks = sqliteTable('tasks', {
   relatedEntityType: text('related_entity_type'),
   relatedEntityId: text('related_entity_id'),
   escalationReason: text('escalation_reason'),
+  notes: text('notes'),
   recommendedNextAction: text('recommended_next_action'),
   owner: text('owner'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
@@ -180,4 +188,33 @@ export const drafts = sqliteTable('drafts', {
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
   sentAt: integer('sent_at', { mode: 'timestamp' }),
+});
+
+export const mailAccounts = sqliteTable('mail_accounts', {
+  id: text('id').primaryKey(),
+  provider: text('provider').notNull(), // 'gmail', 'mock', etc.
+  email: text('email').notNull().unique(),
+  displayName: text('display_name'),
+  credentials: text('credentials'), // JSON, encrypted in production
+  isActive: integer('is_active', { mode: 'boolean' }).default(true),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const mailboxes = sqliteTable('mailboxes', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').references(() => mailAccounts.id).notNull(),
+  name: text('name').notNull(), // 'INBOX', 'Sent', etc.
+  providerId: text('provider_id'), // provider-specific mailbox ID
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const mailSyncState = sqliteTable('mail_sync_state', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').references(() => mailAccounts.id).notNull().unique(),
+  lastSyncedAt: integer('last_synced_at', { mode: 'timestamp' }),
+  lastHistoryId: text('last_history_id'), // for Gmail incremental sync
+  syncStatus: text('sync_status').default('idle'), // 'idle', 'syncing', 'error'
+  errorMessage: text('error_message'),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });

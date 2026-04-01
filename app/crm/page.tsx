@@ -13,7 +13,7 @@ export default function CRMPage() {
 
   useEffect(() => {
     if (electron) {
-      electron.db.query('companies', 'findMany', {}).then(setCompanies);
+      electron.crm.getCompanies().then(setCompanies);
     } else {
       Promise.resolve().then(() => {
         setCompanies([
@@ -37,38 +37,8 @@ export default function CRMPage() {
   useEffect(() => {
     if (electron && selectedCompany) {
       const loadLinkedData = async () => {
-        // Fetch entity links where target is this company
-        const links = await electron.db.query('entityLinks', 'findMany', { 
-          where: { targetType: 'company', targetId: selectedCompany.id } 
-        });
-
-        const messageIds = links.filter((l: any) => l.sourceType === 'message').map((l: any) => l.sourceId);
-        const tabIds = links.filter((l: any) => l.sourceType === 'browser_tab').map((l: any) => l.sourceId);
-
-        let messages = [];
-        if (messageIds.length > 0) {
-          // Fetch messages by IDs (simplifying by fetching all and filtering for now due to IPC limitations)
-          const allMsgs = await electron.db.query('messages', 'findMany', {});
-          messages = allMsgs.filter((m: any) => messageIds.includes(m.id));
-        }
-
-        const tasks = await electron.db.query('tasks', 'findMany', { 
-          where: { relatedEntityType: 'company', relatedEntityId: selectedCompany.id } 
-        });
-        
-        const drafts = await electron.db.query('drafts', 'findMany', { 
-          where: { companyId: selectedCompany.id } 
-        });
-
-        // Fetch evidence linked to this company or its tabs/messages
-        const allEvidence = await electron.db.query('evidenceFragments', 'findMany', {});
-        const evidence = allEvidence.filter((e: any) => 
-          e.companyId === selectedCompany.id || 
-          (e.sourceType === 'inbox_message' && messageIds.includes(e.sourceId)) ||
-          (e.sourceType === 'browser_tab' && tabIds.includes(e.sourceId))
-        );
-
-        setLinkedEntities({ messages, tasks, evidence, drafts });
+        const links = await electron.crm.getCompanyLinks(selectedCompany.id);
+        setLinkedEntities(links);
       };
       
       loadLinkedData();

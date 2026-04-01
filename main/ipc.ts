@@ -2,7 +2,7 @@ import { ipcMain, WebContents } from 'electron';
 import { BrowserManager } from './browser-manager';
 import { db } from '../db';
 import * as schema from '../db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, asc, and, inArray } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { CommandRegistry } from '../packages/commands/registry';
 
@@ -64,46 +64,128 @@ export function setupIpcHandlers(uiWebContents: WebContents, browserManager: Bro
     return await commandRegistry.execute(commandName, payload);
   });
 
-  // Generic DB Query IPC (for simple reads)
-  ipcMain.handle('db:query', async (e, { model, action, args }) => {
-    const table = (schema as any)[model];
-    if (!table) throw new Error(`Model ${model} not found`);
-    
-    if (action === 'findMany') {
-      let query = db.select().from(table);
-      
-      if (args && args.where) {
-        const conditions = [];
-        for (const [key, val] of Object.entries(args.where)) {
-          if (typeof val === 'object' && val !== null && 'contains' in val) {
-            const { like } = require('drizzle-orm');
-            conditions.push(like(table[key], `%${(val as any).contains}%`));
-          } else {
-            conditions.push(eq(table[key], val));
-          }
-        }
-        if (conditions.length > 0) {
-          const { and } = require('drizzle-orm');
-          query = query.where(and(...conditions)) as any;
-        }
-      }
-      
-      if (args && args.orderBy) {
-        const [col, dir] = Object.entries(args.orderBy)[0];
-        query = query.orderBy(dir === 'desc' ? desc(table[col]) : table[col]) as any;
-      } else {
-        const defaultSortCol = table.createdAt || table.receivedAt || table.timestamp || table.id;
-        if (defaultSortCol) {
-          query = query.orderBy(desc(defaultSortCol)) as any;
-        }
-      }
-      
-      return await query;
-    }
-    if (action === 'findById') {
-      const res = await db.select().from(table).where(eq(table.id, args.id));
-      return res[0] || null;
-    }
-    throw new Error(`Action ${action} not supported via generic query`);
+  // ---- Typed Reads ----
+
+  ipcMain.handle('browser:getTabs', async () => {
+    return db.select().from(schema.browserTabs).orderBy(asc(schema.browserTabs.tabOrder));
   });
+
+  ipcMain.handle('browser:getActiveTab', async () => {
+    const rows = await db.select().from(schema.browserTabs).where(eq(schema.browserTabs.active, true));
+    return rows[0] ?? null;
+  });
+
+  ipcMain.handle('browser:getTabContext', async (e, tabId: string) => {
+    const [tab] = await db.select().from(schema.browserTabs).where(eq(schema.browserTabs.id, tabId));
+    if (!tab) return null;
+    let linkedCompany = null;
+    let recentEvidence: any[] = [];
+    let recentTasks: any[] = [];
+    
+    if (tab.linkedCompanyId) {
+      linkedCompany = (await db.select().from(schema.companies).where(eq(schema.companies.id, tab.linkedCompanyId)))[0] ?? null;
+      if (linkedCompany) {
+        recentEvidence = await db.select().from(schema.evidenceFragments)
+          .where(eq(schema.evidenceFragments.companyId, linkedCompany.id))
+          .orderBy(desc(schema.evidenceFragments.timestamp));
+        recentTasks = await db.select().from(schema.tasks)
+          .where(and(eq(schema.tasks.relatedEntityType, 'company'), eq(schema.tasks.relatedEntityId, linkedCompany.id)))
+          .orderBy(desc(schema.tasks.createdAt));
+      }
+    }
+    return { tab, linkedCompany, recentEvidence, recentTasks };
+  });
+
+  // Inbox
+  ipcMain.handle('inbox:getThreads', async (e, archived) => {
+    const threads = await db.select().from(schema.threads).orderBy(desc(schema.threads.updatedAt));
+    
+    // Enrich with latest message and unread count
+    const enrichedThreads = await Promise.all(threads.map(async (thread) => {
+      const messages = await db.select().from(schema.messages).where(eq(schema.messages.threadId, thread.id)).orderBy(desc(schema.messages.receivedAt));
+      const latestMsg = messages[0];
+      const unreadCount = messages.filter(m => !m.readState).length;
+      return {
+        ...thread,
+        latestMsg,
+        unreadCount
+      };
+    }));
+
+    return enrichedThreads.filter(t => t.latestMsg);
+  });
+
+  ipcMain.handle('inbox:getThreadContext', async (e, threadId: string) => {
+    const [thread] = await db.select().from(schema.threads).where(eq(schema.threads.id, threadId));
+    if (!thread) return null;
+
+    const messages = await db.select().from(schema.messages).where(eq(schema.messages.threadId, threadId)).orderBy(asc(schema.messages.receivedAt));
+    const msgIds = messages.map(m => m.id);
+
+    // Linked Companies
+    const links = await db.select().from(schema.entityLinks).where(and(eq(schema.entityLinks.sourceType, 'message'), inArray(schema.entityLinks.sourceId, msgIds)));
+    const companyIds = [...new Set(links.filter(l => l.targetType === 'company').map(l => l.targetId))];
+    const companies = companyIds.length > 0 ? await db.select().from(schema.companies).where(inArray(schema.companies.id, companyIds)) : [];
+
+    // Evidence
+    const evidence = msgIds.length > 0 ? await db.select().from(schema.evidenceFragments).where(inArray(schema.evidenceFragments.inboxMessageId, msgIds)) : [];
+
+    // Drafts
+    const drafts = await db.select().from(schema.drafts).where(eq(schema.drafts.linkedInboxThreadId, threadId));
+
+    // Message Labels
+    const labels = msgIds.length > 0 ? await db.select().from(schema.messageLabels).where(inArray(schema.messageLabels.messageId, msgIds)) : [];
+
+    return { thread, messages, companies, evidence, drafts, messageLabels: labels };
+  });
+
+  ipcMain.handle('inbox:getMessageLabels', async () => {
+    return db.select().from(schema.messageLabels);
+  });
+
+  ipcMain.handle('inbox:getLabels', async () => {
+    return db.select().from(schema.labels);
+  });
+
+  // CRM
+  ipcMain.handle('crm:getCompanies', async () => {
+    return db.select().from(schema.companies).orderBy(desc(schema.companies.updatedAt));
+  });
+
+  ipcMain.handle('crm:getCompanyDetail', async (e, companyId: string) => {
+    const [company] = await db.select().from(schema.companies).where(eq(schema.companies.id, companyId));
+    return company;
+  });
+
+  ipcMain.handle('crm:getCompanyLinks', async (e, companyId: string) => {
+    return { 
+      messages: await db.select().from(schema.messages).where(eq(schema.messages.threadId, companyId)), // simplified
+      evidence: await db.select().from(schema.evidenceFragments).where(eq(schema.evidenceFragments.companyId, companyId)),
+      tasks: await db.select().from(schema.tasks).where(eq(schema.tasks.relatedEntityId, companyId)),
+      drafts: await db.select().from(schema.drafts).where(eq(schema.drafts.companyId, companyId)),
+      browserTabs: await db.select().from(schema.browserTabs).where(eq(schema.browserTabs.linkedCompanyId, companyId)),
+    };
+  });
+
+  // Tasks
+  ipcMain.handle('tasks:getTasks', async () => {
+    return db.select().from(schema.tasks).orderBy(desc(schema.tasks.createdAt));
+  });
+
+  // Outreach / Drafts
+  ipcMain.handle('outreach:getDrafts', async () => {
+    return db.select().from(schema.drafts).orderBy(desc(schema.drafts.createdAt));
+  });
+
+  // Notebook
+  ipcMain.handle('notebook:getEntries', async () => {
+    return db.select().from(schema.notebookEntries).orderBy(desc(schema.notebookEntries.createdAt));
+  });
+
+  // Evidence
+  ipcMain.handle('evidence:getFragments', async () => {
+    return db.select().from(schema.evidenceFragments).orderBy(desc(schema.evidenceFragments.timestamp));
+  });
+
+
 }

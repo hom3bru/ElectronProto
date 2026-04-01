@@ -11,7 +11,7 @@ export default function EvidencePage() {
 
   useEffect(() => {
     if (electron) {
-      electron.db.query('evidenceFragments', 'findMany', { orderBy: { timestamp: 'desc' } }).then(setEvidence);
+      electron.evidence.getFragments().then(setEvidence);
     }
   }, [electron]);
 

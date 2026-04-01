@@ -25,48 +25,26 @@ export default function InboxPage() {
 
   const loadData = useCallback(async () => {
     if (electron) {
-      const ths = await electron.db.query('threads', 'findMany', { orderBy: { updatedAt: 'desc' } });
-      const msgs = await electron.db.query('messages', 'findMany', { orderBy: { receivedAt: 'asc' } });
-      const lbls = await electron.db.query('labels', 'findMany', {});
-      const msgLbls = await electron.db.query('messageLabels', 'findMany', {});
-      const comps = await electron.db.query('companies', 'findMany', { orderBy: { name: 'asc' } });
+      const ths = await electron.inbox.getThreads();
+      const lbls = await electron.inbox.getLabels();
+      const msgLabels = await electron.inbox.getMessageLabels();
+      const comps = await electron.crm.getCompanies();
       setThreads(ths);
-      setMessages(msgs);
       setAllLabels(lbls);
-      setMessageLabels(msgLbls);
+      setMessageLabels(msgLabels);
       setAllCompanies(comps);
     }
   }, [electron]);
 
-  const loadLinkedData = useCallback(async (threadId: string, threadMessages: Message[]) => {
-    if (!electron || threadMessages.length === 0) return;
-    const msgIds = threadMessages.map(m => m.id);
-    
-    // Fetch entity links where sourceId is in msgIds and targetType is 'company'
-    const links = await electron.db.query('entityLinks', 'findMany', {
-      where: { sourceType: 'message' }
-    });
-    
-    const relevantLinks = links.filter((l: any) => msgIds.includes(l.sourceId) && l.targetType === 'company');
-    const companyIds = [...new Set(relevantLinks.map((l: any) => l.targetId))];
-    
-    const companies = [];
-    for (const cid of companyIds) {
-      const comp = await electron.db.query('companies', 'findById', { id: cid });
-      if (comp) companies.push(comp);
+  const loadThreadContext = useCallback(async (threadId: string) => {
+    if (!electron) return;
+    const context = await electron.inbox.getThreadContext(threadId);
+    if (context) {
+      setMessages(context.messages);
+      setLinkedCompanies(context.companies);
+      setLinkedEvidence(context.evidence);
+      setThreadDrafts(context.drafts);
     }
-    setLinkedCompanies(companies);
-
-    // Fetch evidence where inboxMessageId is in msgIds
-    const evidence = await electron.db.query('evidenceFragments', 'findMany', {});
-    const relevantEvidence = evidence.filter((e: any) => msgIds.includes(e.inboxMessageId));
-    setLinkedEvidence(relevantEvidence);
-
-    // Fetch drafts for this thread
-    const drafts = await electron.db.query('drafts', 'findMany', {
-      where: { linkedInboxThreadId: threadId }
-    });
-    setThreadDrafts(drafts);
   }, [electron]);
 
   useEffect(() => {
@@ -76,15 +54,14 @@ export default function InboxPage() {
 
   useEffect(() => {
     if (selectedThreadId) {
-      const threadMsgs = messages.filter(m => m.threadId === selectedThreadId);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      loadLinkedData(selectedThreadId, threadMsgs);
+      loadThreadContext(selectedThreadId);
     } else {
+      setMessages([]);
       setLinkedCompanies([]);
       setLinkedEvidence([]);
       setThreadDrafts([]);
     }
-  }, [selectedThreadId, messages, loadLinkedData]);
+  }, [selectedThreadId, loadThreadContext]);
 
   const handleIngest = async () => {
     if (!electron) return;
@@ -101,34 +78,21 @@ export default function InboxPage() {
   };
 
   const activeThreadMessages = useMemo(() => {
-    if (!selectedThreadId) return [];
-    return messages.filter(m => m.threadId === selectedThreadId);
-  }, [messages, selectedThreadId]);
+    return messages;
+  }, [messages]);
 
   const threadList = useMemo(() => {
     return threads
-      .filter(t => (filter === 'active' ? t.status !== 'archived' : t.status === 'archived'))
-      .map(t => {
-        const tMsgs = messages.filter(m => m.threadId === t.id);
-        const latestMsg = tMsgs[tMsgs.length - 1];
-        const unreadCount = tMsgs.filter(m => !m.readState).length;
-        return {
-          ...t,
-          latestMsg,
-          unreadCount
-        };
-      }).filter(t => t.latestMsg);
-  }, [threads, messages, filter]);
+      .filter(t => (filter === 'active' ? t.status !== 'archived' : t.status === 'archived'));
+  }, [threads, filter]);
 
   const handleSelectThread = async (threadId: string) => {
     setSelectedThreadId(threadId);
     if (!electron) return;
-    // Mark all messages in thread as read
-    const unreadMsgs = messages.filter(m => m.threadId === threadId && !m.readState);
-    for (const msg of unreadMsgs) {
-      await electron.cmd.execute('markMessageRead', { messageId: msg.id });
-    }
-    if (unreadMsgs.length > 0) {
+    // Mark messages in the newly focused thread as read handled by command
+    const thread = threads.find(t => t.id === threadId);
+    if (thread && thread.unreadCount > 0) {
+      await electron.cmd.execute('markThreadRead', { threadId });
       await loadData();
     }
   };

@@ -41,10 +41,25 @@ async function createWindow() {
   }
 
   browserManager = new BrowserManager(mainWindow, uiView);
+  
+  // Restore saved tabs in the main process before the renderer gets to interact.
+  const notify = (channel: string, ...args: any[]) => uiView.webContents.send(channel, ...args);
+  browserManager.restoreFromDatabase(notify).catch(console.error);
+
   setupIpcHandlers(uiView.webContents, browserManager);
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Run migrations in the Electron process to ensure the DB stays in sync with ABI-matched drivers
+  try {
+    const { migrate } = require('drizzle-orm/better-sqlite3/migrator');
+    const { db: database } = require('../db');
+    await migrate(database, { migrationsFolder: path.join(process.cwd(), 'drizzle') });
+    console.log('[DB] Migrations applied successfully');
+  } catch (e) {
+    console.error('[DB] Migration failed:', e);
+  }
+
   createWindow();
 
   app.on('activate', () => {

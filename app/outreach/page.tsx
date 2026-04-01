@@ -11,7 +11,7 @@ export default function OutreachPage() {
   useEffect(() => {
     const loadDrafts = async () => {
       if (electron) {
-        const drfts = await electron.db.query('drafts', 'findMany', { orderBy: { createdAt: 'desc' } });
+        const drfts = await electron.outreach.getDrafts();
         setDrafts(drfts);
       }
     };
@@ -21,7 +21,7 @@ export default function OutreachPage() {
   const handleAction = async (command: string, draftId: string) => {
     if (!electron) return;
     await electron.cmd.execute(command, { draftId });
-    const drfts = await electron.db.query('drafts', 'findMany', { orderBy: { createdAt: 'desc' } });
+    const drfts = await electron.outreach.getDrafts();
     setDrafts(drfts);
   };
 

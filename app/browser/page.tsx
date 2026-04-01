@@ -25,7 +25,7 @@ export default function BrowserPage() {
     if (!electron) return;
 
     const loadTabs = async () => {
-      const dbTabs = await electron.db.query('browserTabs', 'findMany', { orderBy: { tabOrder: 'asc' } });
+      const dbTabs = await electron.browser.getTabs();
       
       if (dbTabs.length === 0) {
         // Restore empty default tab if nothing exists
@@ -154,16 +154,11 @@ export default function BrowserPage() {
     
     const loadRelatedData = async () => {
       try {
-        const tabData = await electron.db.query('browserTabs', 'findById', { id: activeTab.id });
-        if (tabData?.linkedCompanyId) {
-          const company = await electron.db.query('companies', 'findById', { id: tabData.linkedCompanyId });
-          setLinkedCompany(company);
-          
-          const evidence = await electron.db.query('evidenceFragments', 'findMany', { where: { companyId: company.id } });
-          setRelatedEvidence(evidence);
-          
-          const tasks = await electron.db.query('tasks', 'findMany', { where: { relatedEntityType: 'company', relatedEntityId: company.id } });
-          setRelatedTasks(tasks);
+        const context = await electron.browser.getTabContext(activeTab.id);
+        if (context?.linkedCompany) {
+          setLinkedCompany(context.linkedCompany);
+          setRelatedEvidence(context.recentEvidence || []);
+          setRelatedTasks(context.recentTasks || []);
         } else {
           setLinkedCompany(null);
           setRelatedEvidence([]);
@@ -193,10 +188,9 @@ export default function BrowserPage() {
     if (res.success) {
       // Trigger a reload of related data if we linked a company
       if (command === 'linkBrowserTabToCompany') {
-        const tabData = await electron.db.query('browserTabs', 'findById', { id: activeTab.id });
-        if (tabData?.linkedCompanyId) {
-          const company = await electron.db.query('companies', 'findById', { id: tabData.linkedCompanyId });
-          setLinkedCompany(company);
+        const context = await electron.browser.getTabContext(activeTab.id);
+        if (context?.linkedCompany) {
+          setLinkedCompany(context.linkedCompany);
         }
       }
     }

@@ -1,4 +1,7 @@
 import { BaseWindow, WebContentsView, session } from 'electron';
+import { db } from '../db';
+import * as schema from '../db/schema';
+import { eq, asc } from 'drizzle-orm';
 
 export class BrowserManager {
   private views: Map<string, WebContentsView> = new Map();
@@ -29,22 +32,27 @@ export class BrowserManager {
     // Event capture
     view.webContents.on('did-finish-load', () => {
       notifyRenderer('tab-updated', { id, loadingState: false });
+      db.update(schema.browserTabs).set({ loadingState: false, updatedAt: new Date() }).where(eq(schema.browserTabs.id, id)).catch(console.error);
     });
 
     view.webContents.on('did-start-loading', () => {
       notifyRenderer('tab-updated', { id, loadingState: true });
+      db.update(schema.browserTabs).set({ loadingState: true, updatedAt: new Date() }).where(eq(schema.browserTabs.id, id)).catch(console.error);
     });
 
-    view.webContents.on('page-title-updated', (e, title) => {
+    view.webContents.on('page-title-updated', (e: any, title: string) => {
       notifyRenderer('tab-updated', { id, title });
+      db.update(schema.browserTabs).set({ title, updatedAt: new Date() }).where(eq(schema.browserTabs.id, id)).catch(console.error);
     });
 
-    view.webContents.on('did-navigate', (e, url) => {
+    view.webContents.on('did-navigate', (e: any, url: string) => {
       notifyRenderer('tab-updated', { id, url });
+      db.update(schema.browserTabs).set({ url, updatedAt: new Date() }).where(eq(schema.browserTabs.id, id)).catch(console.error);
     });
     
-    view.webContents.on('did-navigate-in-page', (e, url) => {
+    view.webContents.on('did-navigate-in-page', (e: any, url: string) => {
       notifyRenderer('tab-updated', { id, url });
+      db.update(schema.browserTabs).set({ url, updatedAt: new Date() }).where(eq(schema.browserTabs.id, id)).catch(console.error);
     });
   }
 
@@ -106,6 +114,18 @@ export class BrowserManager {
     const view = this.views.get(id);
     if (view) {
       view.webContents.reload();
+    }
+  }
+
+  async restoreFromDatabase(notifyRenderer: (event: string, ...args: any[]) => void) {
+    const savedTabs = await db.select().from(schema.browserTabs).orderBy(asc(schema.browserTabs.tabOrder));
+    if (savedTabs.length === 0) return;
+    for (const tab of savedTabs) {
+      this.createTab(tab.id, tab.sessionPartition, tab.url, notifyRenderer);
+    }
+    const activeTab = savedTabs.find((t: any) => t.active) ?? savedTabs[0];
+    if (activeTab) {
+      this.switchTab(activeTab.id);
     }
   }
 }

@@ -16,16 +16,16 @@ export class MockMailProvider implements MailProvider {
   async fetchMessages(since?: Date) {
     return [
       {
-        providerId: `mock-${uuidv4()}`,
+        providerId: 'mock-msg-founder-1',
         from: 'founder@acme.com',
         to: 'agent@internal.com',
         subject: 'Interested in your product',
         snippet: 'Hi, we are looking for a solution...',
         plainTextBody: 'Hi, we are looking for a solution to our problem. Can we chat?',
-        receivedAt: new Date(),
+        receivedAt: new Date(Date.now() - 3600000 * 24), // 1 day ago
       },
       {
-        providerId: `mock-${uuidv4()}`,
+        providerId: 'mock-msg-urgent-2',
         from: 'urgent@startup.io',
         to: 'agent@internal.com',
         subject: 'URGENT: Partnership opportunity',

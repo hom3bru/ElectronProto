@@ -11,7 +11,7 @@ export default function NotebookPage() {
 
   const loadEntries = useCallback(async () => {
     if (electron) {
-      const data = await electron.db.query('notebookEntries', 'findMany', { orderBy: { createdAt: 'desc' } });
+      const data = await electron.notebook.getEntries();
       setEntries(data);
     }
   }, [electron]);
