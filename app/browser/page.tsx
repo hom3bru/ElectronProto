@@ -25,8 +25,18 @@ export default function BrowserPage() {
     if (!electron) return;
 
     const loadTabs = async () => {
-      const dbTabs = await electron.db.query('browserTabs', 'findMany', {});
+      const dbTabs = await electron.db.query('browserTabs', 'findMany', { orderBy: { tabOrder: 'asc' } });
       
+      if (dbTabs.length === 0) {
+        // Restore empty default tab if nothing exists
+        const id = await electron.browser.createTab('browser-default', 'https://google.com');
+        setTabs([{ id, url: 'https://google.com', title: 'New Tab', loadingState: false, sessionPartition: 'browser-default' }]);
+        setActiveTabId(id);
+        electron.browser.switchTab(id);
+        setUrlInput('https://google.com');
+        return;
+      }
+
       // Restore tabs in the backend
       for (const t of dbTabs) {
         await electron.browser.restoreTab(t.id, t.sessionPartition, t.url);
@@ -40,10 +50,11 @@ export default function BrowserPage() {
         sessionPartition: t.sessionPartition
       })));
 
-      if (dbTabs.length > 0) {
-        setActiveTabId(dbTabs[0].id);
-        electron.browser.switchTab(dbTabs[0].id);
-        setUrlInput(dbTabs[0].url);
+      const activeTab = dbTabs.find((t: any) => t.active) || dbTabs[0];
+      if (activeTab) {
+        setActiveTabId(activeTab.id);
+        electron.browser.switchTab(activeTab.id);
+        setUrlInput(activeTab.url);
       }
     };
     loadTabs();
@@ -81,6 +92,11 @@ export default function BrowserPage() {
     window.addEventListener('resize', updateBounds);
     return () => window.removeEventListener('resize', updateBounds);
   }, [electron, activeTabId]);
+
+  useEffect(() => {
+    if (!electron || tabs.length === 0) return;
+    electron.browser.updateTabOrder(tabs.map(t => t.id));
+  }, [tabs, electron]);
 
   const handleCreateTab = async () => {
     if (!electron) return;
@@ -128,11 +144,62 @@ export default function BrowserPage() {
 
   const activeTab = tabs.find(t => t.id === activeTabId);
 
+  const [linkedCompany, setLinkedCompany] = useState<any>(null);
+  const [relatedEvidence, setRelatedEvidence] = useState<any[]>([]);
+  const [relatedTasks, setRelatedTasks] = useState<any[]>([]);
+  const [noteInput, setNoteInput] = useState('');
+
+  useEffect(() => {
+    if (!electron || !activeTab) return;
+    
+    const loadRelatedData = async () => {
+      try {
+        const tabData = await electron.db.query('browserTabs', 'findById', { id: activeTab.id });
+        if (tabData?.linkedCompanyId) {
+          const company = await electron.db.query('companies', 'findById', { id: tabData.linkedCompanyId });
+          setLinkedCompany(company);
+          
+          const evidence = await electron.db.query('evidenceFragments', 'findMany', { where: { companyId: company.id } });
+          setRelatedEvidence(evidence);
+          
+          const tasks = await electron.db.query('tasks', 'findMany', { where: { relatedEntityType: 'company', relatedEntityId: company.id } });
+          setRelatedTasks(tasks);
+        } else {
+          setLinkedCompany(null);
+          setRelatedEvidence([]);
+          setRelatedTasks([]);
+        }
+      } catch (e) {
+        console.error("Failed to load related data", e);
+      }
+    };
+    
+    loadRelatedData();
+  }, [electron, activeTab]);
+
   // Actions
   const handleAction = async (command: string) => {
     if (!electron || !activeTab) return;
-    await electron.cmd.execute(command, { tabId: activeTab.id, url: activeTab.url, title: activeTab.title });
-    alert(`Executed ${command} for ${activeTab.title}`);
+    
+    let payload: any = { tabId: activeTab.id, url: activeTab.url, title: activeTab.title };
+    
+    if (command === 'appendNotebookEntryFromBrowserTab') {
+      if (!noteInput.trim()) return;
+      payload.message = noteInput;
+      setNoteInput('');
+    }
+    
+    const res = await electron.cmd.execute(command, payload);
+    if (res.success) {
+      // Trigger a reload of related data if we linked a company
+      if (command === 'linkBrowserTabToCompany') {
+        const tabData = await electron.db.query('browserTabs', 'findById', { id: activeTab.id });
+        if (tabData?.linkedCompanyId) {
+          const company = await electron.db.query('companies', 'findById', { id: tabData.linkedCompanyId });
+          setLinkedCompany(company);
+        }
+      }
+    }
   };
 
   return (
@@ -237,7 +304,58 @@ export default function BrowserPage() {
             </button>
           </div>
 
-          <div className="mt-4 pt-4 border-t border-zinc-800">
+          <div className="mt-2 pt-4 border-t border-zinc-800">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Notebook</h3>
+            <div className="flex flex-col gap-2">
+              <textarea 
+                value={noteInput}
+                onChange={e => setNoteInput(e.target.value)}
+                placeholder="Add a note..."
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-md p-2 text-sm text-zinc-200 resize-none h-20 focus:outline-none focus:border-zinc-700"
+              />
+              <button 
+                onClick={() => handleAction('appendNotebookEntryFromBrowserTab')}
+                disabled={!noteInput.trim()}
+                className="w-full px-3 py-1.5 text-sm bg-zinc-100 text-zinc-900 hover:bg-white rounded-md transition-colors disabled:opacity-50"
+              >
+                Save Note
+              </button>
+            </div>
+          </div>
+
+          {linkedCompany && (
+            <div className="mt-2 pt-4 border-t border-zinc-800">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Linked Company</h3>
+              <div className="bg-zinc-950 border border-zinc-800 rounded-md p-3">
+                <div className="font-medium text-sm text-zinc-100">{linkedCompany.name}</div>
+                <div className="text-xs text-zinc-500 mt-1">{linkedCompany.domain}</div>
+              </div>
+              
+              {relatedTasks.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-xs text-zinc-400 mb-2">Related Tasks ({relatedTasks.length})</h4>
+                  <div className="space-y-1">
+                    {relatedTasks.slice(0, 3).map(task => (
+                      <div key={task.id} className="text-xs text-zinc-300 truncate">• {task.title}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {relatedEvidence.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-xs text-zinc-400 mb-2">Recent Evidence ({relatedEvidence.length})</h4>
+                  <div className="space-y-1">
+                    {relatedEvidence.slice(0, 3).map(ev => (
+                      <div key={ev.id} className="text-xs text-zinc-300 truncate">&quot;{ev.claimSummary}&quot;</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="mt-auto pt-4 border-t border-zinc-800">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Tab Metadata</h3>
             {activeTab ? (
               <div className="space-y-3 text-xs text-zinc-400">

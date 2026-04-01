@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electron', {
     restoreTab: (id: string, partition: string, url: string) => ipcRenderer.invoke('browser:restoreTab', { id, partition, url }),
     switchTab: (id: string) => ipcRenderer.invoke('browser:switchTab', id),
     closeTab: (id: string) => ipcRenderer.invoke('browser:closeTab', id),
+    updateTabOrder: (tabIds: string[]) => ipcRenderer.invoke('browser:updateTabOrder', tabIds),
     setBounds: (bounds: any) => ipcRenderer.invoke('browser:setBounds', bounds),
     navigate: (id: string, url: string) => ipcRenderer.invoke('browser:navigate', { id, url }),
     goBack: (id: string) => ipcRenderer.invoke('browser:goBack', id),

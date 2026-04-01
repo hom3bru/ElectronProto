@@ -19,9 +19,34 @@ export class CommandRegistry {
           updatedAt: new Date(),
         });
         
+        await db.insert(schema.entityLinks).values({
+          id: uuidv4(),
+          sourceType: 'message',
+          sourceId: messageId,
+          targetType: 'company',
+          targetId: id,
+          relationship: 'mentions',
+          createdAt: new Date(),
+        });
+        
         // Log to notebook
         await this.logNotebookEntry('company', id, 'created', `Company created from message ${messageId}`, 'agent', 'System');
         return { success: true, id };
+      }
+
+      case 'linkMessageToCompany': {
+        const { messageId, companyId } = payload;
+        await db.insert(schema.entityLinks).values({
+          id: uuidv4(),
+          sourceType: 'message',
+          sourceId: messageId,
+          targetType: 'company',
+          targetId: companyId,
+          relationship: 'mentions',
+          createdAt: new Date(),
+        });
+        await this.logNotebookEntry('message', messageId, 'linked', `Message linked to company ${companyId}`, 'agent', 'System');
+        return { success: true };
       }
 
       case 'createEvidenceFromMessage': {
@@ -108,6 +133,12 @@ export class CommandRegistry {
         return { success: true, id };
       }
 
+      case 'appendNotebookEntryFromBrowserTab': {
+        const { tabId, message } = payload;
+        await this.logNotebookEntry('browser_tab', tabId, 'note', message, 'agent', 'System');
+        return { success: true };
+      }
+
       case 'createTask': {
         const { title, type, priority, relatedEntityType, relatedEntityId } = payload;
         const id = uuidv4();
@@ -146,6 +177,23 @@ export class CommandRegistry {
         return { success: true, taskId };
       }
 
+      case 'createDraftFromThread': {
+        const { threadId, subject, body } = payload;
+        const id = uuidv4();
+        await db.insert(schema.drafts).values({
+          id,
+          linkedInboxThreadId: threadId,
+          subject,
+          body,
+          status: 'draft',
+          approvalStatus: 'pending',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        await this.logNotebookEntry('draft', id, 'created', `Draft created for thread ${threadId}`, 'agent', 'System');
+        return { success: true, id };
+      }
+
       case 'createDraftFromCompany': {
         const { companyId, subject, body } = payload;
         const id = uuidv4();
@@ -163,6 +211,12 @@ export class CommandRegistry {
         return { success: true, id };
       }
 
+      case 'updateDraft': {
+        const { draftId, subject, body } = payload;
+        await db.update(schema.drafts).set({ subject, body, updatedAt: new Date() }).where(eq(schema.drafts.id, draftId));
+        return { success: true };
+      }
+
       case 'approveDraft': {
         const { draftId } = payload;
         await db.update(schema.drafts).set({ approvalStatus: 'approved', status: 'approved', updatedAt: new Date() }).where(eq(schema.drafts.id, draftId));
@@ -174,6 +228,19 @@ export class CommandRegistry {
         const { draftId } = payload;
         await db.update(schema.drafts).set({ status: 'sent', sentAt: new Date(), updatedAt: new Date() }).where(eq(schema.drafts.id, draftId));
         await this.logNotebookEntry('draft', draftId, 'sent', `Draft sent`, 'agent', 'System');
+        return { success: true };
+      }
+
+      case 'archiveThread': {
+        const { threadId } = payload;
+        await db.update(schema.threads).set({ status: 'archived', updatedAt: new Date() }).where(eq(schema.threads.id, threadId));
+        await this.logNotebookEntry('thread', threadId, 'archived', `Thread archived`, 'agent', 'System');
+        return { success: true };
+      }
+
+      case 'markMessageRead': {
+        const { messageId } = payload;
+        await db.update(schema.messages).set({ readState: true }).where(eq(schema.messages.id, messageId));
         return { success: true };
       }
 
@@ -191,12 +258,44 @@ export class CommandRegistry {
         return { success: true };
       }
 
+      case 'createLabel': {
+        const { name, color } = payload;
+        const id = uuidv4();
+        await db.insert(schema.labels).values({
+          id,
+          name,
+          color: color || '#888888',
+          createdAt: new Date(),
+        });
+        return { success: true, id };
+      }
+
+      case 'addLabelToMessage': {
+        const { messageId, labelId } = payload;
+        await db.insert(schema.messageLabels).values({ messageId, labelId });
+        await this.logNotebookEntry('message', messageId, 'labeled', `Label ${labelId} added to message`, 'agent', 'System');
+        return { success: true };
+      }
+
+      case 'removeLabelFromMessage': {
+        const { messageId, labelId } = payload;
+        await db.delete(schema.messageLabels).where(
+          require('drizzle-orm').and(
+            eq(schema.messageLabels.messageId, messageId),
+            eq(schema.messageLabels.labelId, labelId)
+          )
+        );
+        await this.logNotebookEntry('message', messageId, 'unlabeled', `Label ${labelId} removed from message`, 'agent', 'System');
+        return { success: true };
+      }
+
       case 'ingestMail': {
         const { MockMailProvider } = require('../mail/mock-provider');
         const { MailIngestionService } = require('../mail/ingestion');
         const provider = new MockMailProvider();
         const service = new MailIngestionService(provider);
         await service.ingest();
+        await this.logNotebookEntry('system', 'mail', 'ingest', `Mail ingested from mock provider`, 'agent', 'System');
         return { success: true };
       }
 

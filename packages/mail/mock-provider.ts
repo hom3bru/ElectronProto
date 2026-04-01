@@ -30,7 +30,7 @@ export class MockMailProvider implements MailProvider {
         to: 'agent@internal.com',
         subject: 'URGENT: Partnership opportunity',
         snippet: 'We need to move fast on this...',
-        plainTextBody: 'We need to move fast on this. Please review the attached deck.',
+        plainTextBody: 'We need to move fast on this. Please review the attached deck at https://startup.io/deck.pdf and let me know.',
         receivedAt: new Date(Date.now() - 3600000), // 1 hour ago
       }
     ];

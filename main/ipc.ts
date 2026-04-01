@@ -30,11 +30,21 @@ export function setupIpcHandlers(uiWebContents: WebContents, browserManager: Bro
     browserManager.createTab(id, partition, url, notify);
   });
 
-  ipcMain.handle('browser:switchTab', (e, id) => browserManager.switchTab(id));
+  ipcMain.handle('browser:switchTab', async (e, id) => {
+    browserManager.switchTab(id);
+    await db.update(schema.browserTabs).set({ active: false });
+    await db.update(schema.browserTabs).set({ active: true, lastFocusedTimestamp: new Date(), updatedAt: new Date() }).where(eq(schema.browserTabs.id, id));
+  });
   
   ipcMain.handle('browser:closeTab', async (e, id) => {
     browserManager.closeTab(id);
     await db.delete(schema.browserTabs).where(eq(schema.browserTabs.id, id));
+  });
+
+  ipcMain.handle('browser:updateTabOrder', async (e, tabIds: string[]) => {
+    for (let i = 0; i < tabIds.length; i++) {
+      await db.update(schema.browserTabs).set({ tabOrder: i, updatedAt: new Date() }).where(eq(schema.browserTabs.id, tabIds[i]));
+    }
   });
 
   ipcMain.handle('browser:setBounds', (e, bounds) => browserManager.setBounds(bounds));

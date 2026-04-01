@@ -21,11 +21,18 @@ A local-first desktop application built as an internal agent workspace for start
 
 ## 4. How to run locally
 1. Install dependencies: `npm install`
-2. Push database schema: `npm run db:push`
+2. Push database schema: `npm run db:migrate`
 3. Seed database: `npm run db:seed`
-4. Start desktop app: `npm run dev:desktop`
+4. Start desktop app: `npm run electron:dev`
 
 *(Note: `npm run dev` starts only the web renderer for preview purposes. The browser tabs require the Electron environment.)*
+
+## 5. Production Build
+To build the packaged application:
+`npm run electron:build`
+
+**Production Loading Path**:
+The application uses Next.js static export (`output: 'export'`). During the build process, Next.js generates static HTML/JS/CSS files in the `out/` directory. The Electron main process loads `out/index.html` in production, ensuring that the Next.js renderer works correctly within the packaged Electron app without needing a separate Node.js server.
 
 ## 5. Database schema summary
 - `companies`, `contacts`: CRM core.

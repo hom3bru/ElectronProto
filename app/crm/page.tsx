@@ -36,14 +36,42 @@ export default function CRMPage() {
 
   useEffect(() => {
     if (electron && selectedCompany) {
-      // Fetch linked entities (mocking the complex joins for now, assuming basic structure)
-      Promise.all([
-        electron.db.query('messages', 'findMany', { where: { from: { contains: selectedCompany.domain } } }),
-        electron.db.query('tasks', 'findMany', { where: { relatedEntityType: 'company', relatedEntityId: selectedCompany.id } }),
-        electron.db.query('drafts', 'findMany', { where: { companyId: selectedCompany.id } })
-      ]).then(([messages, tasks, drafts]) => {
-        setLinkedEntities({ messages, tasks, evidence: [], drafts });
-      });
+      const loadLinkedData = async () => {
+        // Fetch entity links where target is this company
+        const links = await electron.db.query('entityLinks', 'findMany', { 
+          where: { targetType: 'company', targetId: selectedCompany.id } 
+        });
+
+        const messageIds = links.filter((l: any) => l.sourceType === 'message').map((l: any) => l.sourceId);
+        const tabIds = links.filter((l: any) => l.sourceType === 'browser_tab').map((l: any) => l.sourceId);
+
+        let messages = [];
+        if (messageIds.length > 0) {
+          // Fetch messages by IDs (simplifying by fetching all and filtering for now due to IPC limitations)
+          const allMsgs = await electron.db.query('messages', 'findMany', {});
+          messages = allMsgs.filter((m: any) => messageIds.includes(m.id));
+        }
+
+        const tasks = await electron.db.query('tasks', 'findMany', { 
+          where: { relatedEntityType: 'company', relatedEntityId: selectedCompany.id } 
+        });
+        
+        const drafts = await electron.db.query('drafts', 'findMany', { 
+          where: { companyId: selectedCompany.id } 
+        });
+
+        // Fetch evidence linked to this company or its tabs/messages
+        const allEvidence = await electron.db.query('evidenceFragments', 'findMany', {});
+        const evidence = allEvidence.filter((e: any) => 
+          e.companyId === selectedCompany.id || 
+          (e.sourceType === 'inbox_message' && messageIds.includes(e.sourceId)) ||
+          (e.sourceType === 'browser_tab' && tabIds.includes(e.sourceId))
+        );
+
+        setLinkedEntities({ messages, tasks, evidence, drafts });
+      };
+      
+      loadLinkedData();
     }
   }, [electron, selectedCompany]);
 
@@ -198,8 +226,18 @@ export default function CRMPage() {
                   <FileText className="w-4 h-4" />
                   Evidence & Notes
                 </h3>
-                <div className="p-4 border border-zinc-800/50 rounded-lg border-dashed text-center text-sm text-zinc-500">
-                  No evidence linked.
+                <div className="space-y-2">
+                  {linkedEntities.evidence.map((ev: any) => (
+                    <div key={ev.id} className="p-3 bg-zinc-900/50 border border-zinc-800/50 rounded-lg">
+                      <div className="text-sm font-medium mb-1 truncate">{ev.claimSummary}</div>
+                      {ev.quote && <div className="text-xs text-zinc-500 italic truncate">&quot;{ev.quote}&quot;</div>}
+                    </div>
+                  ))}
+                  {linkedEntities.evidence.length === 0 && (
+                    <div className="p-4 border border-zinc-800/50 rounded-lg border-dashed text-center text-sm text-zinc-500">
+                      No evidence linked.
+                    </div>
+                  )}
                 </div>
               </section>
               

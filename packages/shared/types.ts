@@ -33,6 +33,14 @@ export interface BrowserTab {
   updatedAt: Date;
 }
 
+export interface Thread {
+  id: string;
+  subject: string | null;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface Message {
   id: string;
   providerId: string | null;

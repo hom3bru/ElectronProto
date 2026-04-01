@@ -37,7 +37,7 @@ async function createWindow() {
   if (isDev) {
     uiView.webContents.loadURL('http://localhost:3000');
   } else {
-    uiView.webContents.loadFile(path.join(__dirname, '../out/index.html'));
+    uiView.webContents.loadFile(path.join(__dirname, '../../out/index.html'));
   }
 
   browserManager = new BrowserManager(mainWindow, uiView);
