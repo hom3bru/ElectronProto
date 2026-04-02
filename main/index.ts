@@ -2,12 +2,15 @@ import { app, BrowserWindow, BaseWindow, WebContentsView } from 'electron';
 import * as path from 'path';
 import { setupIpcHandlers } from './ipc';
 import { BrowserManager } from './browser-manager';
+import { BrowserOrchestrator } from './browser-orchestrator';
 import { VerificationService } from '../packages/services/verification.service';
+import { createMachineBrowserProvider } from '../packages/machine-browser';
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
 let mainWindow: BaseWindow | null = null;
 let browserManager: BrowserManager | null = null;
+let orchestrator: BrowserOrchestrator | null = null;
 
 async function createWindow() {
   mainWindow = new BaseWindow({
@@ -46,8 +49,20 @@ async function createWindow() {
   browserManager = new BrowserManager(mainWindow, uiView, notify);
   browserManager.restoreFromDatabase().catch(console.error);
 
-  setupIpcHandlers(uiView.webContents, browserManager);
-  
+  // Initialize machine browser provider and orchestrator
+  const providerType = (process.env.MACHINE_BROWSER ?? 'playwright') as 'playwright' | 'lightpanda';
+  const provider = createMachineBrowserProvider(providerType, {
+    lightpandaEndpoint: process.env.LIGHTPANDA_ENDPOINT ?? 'http://localhost:9222',
+  });
+  provider.initialize().then(() => {
+    console.log(`[Main] Machine browser provider ready: ${providerType}`);
+  }).catch((e) => {
+    console.warn(`[Main] Machine browser provider failed to initialize (${providerType}):`, e.message);
+  });
+  orchestrator = new BrowserOrchestrator(provider, notify);
+
+  setupIpcHandlers(uiView.webContents, browserManager, orchestrator);
+
   // Initialize Background Verification Service
   VerificationService.init(mainWindow).catch(console.error);
 }
@@ -74,6 +89,12 @@ app.whenReady().then(async () => {
       createWindow();
     }
   });
+});
+
+app.on('before-quit', async () => {
+  if (orchestrator) {
+    await orchestrator.shutdown().catch(console.error);
+  }
 });
 
 app.on('window-all-closed', () => {

@@ -1,9 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { Plus, X, ChevronLeft, ChevronRight, RotateCw, Bookmark, Shield, Link2, FileText, CheckSquare } from 'lucide-react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { Plus, X, ChevronLeft, ChevronRight, RotateCw, Bookmark, Shield, Link2,
+  FileText, CheckSquare, BookOpen, Bot, Eye, Zap, Globe, Tag, Crosshair,
+  AlertTriangle, Play, Square, Activity } from 'lucide-react';
 import { clsx } from 'clsx';
 import { EntityPicker } from '@/components/entity-picker';
+
+type BrowserMode = 'normal' | 'training' | 'assist' | 'autonomous' | 'watch';
 
 interface BrowserTabState {
   id: string;
@@ -29,6 +33,21 @@ export default function BrowserPage() {
   const [partition, setPartition] = useState('browser-default');
 
   const electron = typeof window !== 'undefined' ? (window as any).electron : null;
+
+  // ─── Mode & Orchestration State ────────────────────────────────────────────
+  const [browserMode, setBrowserMode] = useState<BrowserMode>('normal');
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [watchState, setWatchState] = useState<any>(null);
+  const [siteProfile, setSiteProfile] = useState<any>(null);
+
+  // ─── Training Panel State ───────────────────────────────────────────────────
+  const [trainingTab, setTrainingTab] = useState<'site' | 'field' | 'recipe' | 'annotate'>('site');
+  const [fieldName, setFieldName] = useState('');
+  const [fieldSelector, setFieldSelector] = useState('');
+  const [fieldKeywords, setFieldKeywords] = useState('');
+  const [recipeName, setRecipeName] = useState('');
+  const [annotationNote, setAnnotationNote] = useState('');
+  const [trainingMsg, setTrainingMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!electron) return;
@@ -137,6 +156,51 @@ export default function BrowserPage() {
     reloadContext();
   }, [electron, activeTab?.id]);
 
+  // Load site profile when in training mode and URL changes
+  useEffect(() => {
+    if (!electron || browserMode !== 'training' || !activeTab?.url) return;
+    electron.training.getSiteProfileForUrl(activeTab.url).then((res: any) => {
+      if (res?.ok) setSiteProfile(res.data);
+    }).catch(() => {});
+  }, [electron, browserMode, activeTab?.url]);
+
+  // Subscribe to watch updates
+  useEffect(() => {
+    if (!electron || !activeRunId) return;
+    const unsub = electron.browserRun.onWatchUpdate((state: any) => {
+      if (state.runId === activeRunId) setWatchState(state);
+    });
+    // Load initial snapshot
+    electron.browserRun.watchSnapshot(activeRunId).then((res: any) => {
+      if (res?.ok) setWatchState(res.data);
+    }).catch(() => {});
+    return () => unsub?.();
+  }, [electron, activeRunId]);
+
+  const enterMode = async (mode: BrowserMode) => {
+    if (mode === browserMode) { setBrowserMode('normal'); return; }
+    setBrowserMode(mode);
+    if (mode === 'training' && activeTab?.url) {
+      // Ensure a site profile exists / load it
+      const res = await electron?.training.getSiteProfileForUrl(activeTab.url);
+      if (res?.ok) setSiteProfile(res.data);
+    }
+    if (mode === 'autonomous' && activeTab?.url) {
+      const res = await electron?.browserRun.start({
+        runType: 'autonomous-automation', mode: 'autonomous',
+        leaderBrowserType: 'machine-playwright', targetUrl: activeTab.url, watchEnabled: true,
+      });
+      if (res?.ok) { setActiveRunId(res.data?.id ?? null); setBrowserMode('watch'); }
+    }
+    if (mode === 'assist' && activeTab?.url) {
+      const res = await electron?.browserRun.start({
+        runType: 'visible-agent-control', mode: 'assist',
+        leaderBrowserType: 'visible-electron', targetUrl: activeTab.url,
+      });
+      if (res?.ok) setActiveRunId(res.data?.id ?? null);
+    }
+  };
+
   const doAction = async (action: () => Promise<any>) => {
     if (!electron || !activeTab) return;
     try {
@@ -234,6 +298,45 @@ export default function BrowserPage() {
         </button>
       </div>
 
+      {/* Mode Bar */}
+      <div className="flex items-center gap-1 px-3 py-1.5 bg-zinc-900/80 border-b border-zinc-800">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mr-2">Mode</span>
+        {([
+          { mode: 'training' as BrowserMode, icon: BookOpen, label: 'Train', color: 'blue' },
+          { mode: 'assist' as BrowserMode, icon: Bot, label: 'Assist', color: 'violet' },
+          { mode: 'autonomous' as BrowserMode, icon: Zap, label: 'Auto', color: 'amber' },
+          { mode: 'watch' as BrowserMode, icon: Eye, label: 'Watch', color: 'emerald' },
+        ] as const).map(({ mode, icon: Icon, label, color }) => (
+          <button
+            key={mode}
+            onClick={() => enterMode(mode)}
+            className={clsx(
+              'flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-all',
+              browserMode === mode
+                ? `bg-${color}-500/20 border-${color}-500/50 text-${color}-300`
+                : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700 bg-transparent'
+            )}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            {label}
+          </button>
+        ))}
+        {activeRunId && (
+          <div className="ml-auto flex items-center gap-2">
+            <div className="flex items-center gap-1.5 text-xs text-emerald-400">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Run active
+            </div>
+            <button
+              onClick={() => electron?.browserRun.stop(activeRunId).then(() => { setActiveRunId(null); setWatchState(null); })}
+              className="text-xs px-2 py-0.5 rounded border border-red-800 text-red-400 hover:bg-red-900/30"
+            >
+              Stop
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Browser Content Area */}
       <div className="flex-1 flex min-h-0">
         <div ref={containerRef} className="flex-1 bg-zinc-950 relative">
@@ -246,6 +349,159 @@ export default function BrowserPage() {
         
         {/* Side Drawer for Actions */}
         <div className="w-72 border-l border-zinc-800 bg-zinc-900 flex flex-col shrink-0 overflow-y-auto">
+
+          {/* ── Training Panel ───────────────────────────────────────────── */}
+          {browserMode === 'training' && activeTab && (
+            <div className="p-4 flex flex-col gap-4 border-b border-zinc-800">
+              <div className="flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-blue-400" />
+                <span className="text-xs font-bold uppercase tracking-widest text-blue-400">Training Mode</span>
+              </div>
+              {trainingMsg && <div className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-2 py-1">{trainingMsg}</div>}
+
+              {/* Site approval */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-zinc-400">Domain:</span>
+                  <span className="text-xs font-mono text-zinc-300">{new URL(activeTab.url).hostname}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-zinc-400">Trust:</span>
+                  <span className={clsx('text-xs font-semibold', siteProfile?.trustStatus === 'trusted' ? 'text-emerald-400' : siteProfile?.trustStatus === 'blocked' ? 'text-red-400' : 'text-zinc-500')}>
+                    {siteProfile?.trustStatus ?? 'unreviewed'}
+                  </span>
+                </div>
+                <button
+                  onClick={async () => {
+                    const res = await electron?.training.approveSite(activeTab.url);
+                    if (res?.ok) { setSiteProfile(res.data); setTrainingMsg('Site approved as trusted'); setTimeout(() => setTrainingMsg(null), 3000); }
+                  }}
+                  className="w-full text-xs py-1.5 rounded-md border border-emerald-800 text-emerald-400 hover:bg-emerald-900/20 transition-colors"
+                >
+                  Approve & Trust Site
+                </button>
+              </div>
+
+              {/* Sub-tabs */}
+              <div className="flex gap-1 text-xs">
+                {(['site', 'field', 'recipe', 'annotate'] as const).map((t) => (
+                  <button key={t} onClick={() => setTrainingTab(t)}
+                    className={clsx('px-2 py-1 rounded capitalize', trainingTab === t ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300')}
+                  >{t}</button>
+                ))}
+              </div>
+
+              {trainingTab === 'field' && (
+                <div className="space-y-2">
+                  <input value={fieldName} onChange={e => setFieldName(e.target.value)} placeholder="Field name (e.g. company-name)" className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700" />
+                  <input value={fieldSelector} onChange={e => setFieldSelector(e.target.value)} placeholder="CSS selector" className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700" />
+                  <textarea value={fieldKeywords} onChange={e => setFieldKeywords(e.target.value)} placeholder="Keywords (comma-separated)" className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs text-zinc-200 resize-none h-16 focus:outline-none focus:border-zinc-700" />
+                  <button
+                    disabled={!fieldName.trim()}
+                    onClick={async () => {
+                      const res = await electron?.training.createFieldProfile({
+                        siteProfileId: siteProfile?.id, fieldName: fieldName.trim(),
+                        detectionType: fieldSelector ? 'selector' : fieldKeywords ? 'keyword' : 'combined',
+                        selectorRules: fieldSelector ? { primary: fieldSelector } : null,
+                        keywordRules: fieldKeywords ? fieldKeywords.split(',').map((k: string) => k.trim()) : null,
+                      });
+                      if (res?.ok) { setFieldName(''); setFieldSelector(''); setFieldKeywords(''); setTrainingMsg('Field profile created'); setTimeout(() => setTrainingMsg(null), 3000); }
+                    }}
+                    className="w-full text-xs py-1.5 rounded-md border border-blue-800 text-blue-400 hover:bg-blue-900/20 disabled:opacity-50 transition-colors"
+                  >
+                    Create Field Profile
+                  </button>
+                </div>
+              )}
+
+              {trainingTab === 'recipe' && (
+                <div className="space-y-2">
+                  <input value={recipeName} onChange={e => setRecipeName(e.target.value)} placeholder="Recipe name" className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700" />
+                  <button
+                    disabled={!recipeName.trim()}
+                    onClick={async () => {
+                      const res = await electron?.training.createAutomationRecipe({
+                        siteProfileId: siteProfile?.id, name: recipeName.trim(), triggerType: 'manual',
+                      });
+                      if (res?.ok) { setRecipeName(''); setTrainingMsg('Recipe created'); setTimeout(() => setTrainingMsg(null), 3000); }
+                    }}
+                    className="w-full text-xs py-1.5 rounded-md border border-blue-800 text-blue-400 hover:bg-blue-900/20 disabled:opacity-50 transition-colors"
+                  >
+                    Create Recipe
+                  </button>
+                </div>
+              )}
+
+              {trainingTab === 'annotate' && (
+                <div className="space-y-2">
+                  <textarea value={annotationNote} onChange={e => setAnnotationNote(e.target.value)} placeholder="Annotation note about this page or element..." className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs text-zinc-200 resize-none h-20 focus:outline-none focus:border-zinc-700" />
+                  <button
+                    onClick={async () => {
+                      const res = await electron?.training.createAnnotation({
+                        siteProfileId: siteProfile?.id, pageUrl: activeTab.url,
+                        annotationType: 'page', selectionData: { url: activeTab.url, title: activeTab.title },
+                        note: annotationNote,
+                      });
+                      if (res?.ok) { setAnnotationNote(''); setTrainingMsg('Annotation saved'); setTimeout(() => setTrainingMsg(null), 3000); }
+                    }}
+                    className="w-full text-xs py-1.5 rounded-md border border-blue-800 text-blue-400 hover:bg-blue-900/20 transition-colors"
+                  >
+                    Save Annotation
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Watch Panel ──────────────────────────────────────────────── */}
+          {(browserMode === 'watch' || browserMode === 'autonomous') && (
+            <div className="p-4 flex flex-col gap-3 border-b border-zinc-800">
+              <div className="flex items-center gap-2">
+                <Eye className="w-4 h-4 text-emerald-400" />
+                <span className="text-xs font-bold uppercase tracking-widest text-emerald-400">Watch</span>
+                {watchState && (
+                  <span className={clsx('ml-auto text-xs px-1.5 py-0.5 rounded', watchState.status === 'running' ? 'bg-emerald-500/20 text-emerald-300' : watchState.status === 'failed' ? 'bg-red-500/20 text-red-300' : 'bg-zinc-700 text-zinc-400')}>
+                    {watchState.status}
+                  </span>
+                )}
+              </div>
+              {watchState ? (
+                <div className="space-y-2">
+                  <div className="text-xs font-mono text-zinc-300 bg-zinc-950 rounded px-2 py-1.5 break-all border border-zinc-800">{watchState.currentUrl || '—'}</div>
+                  {watchState.title && <div className="text-xs text-zinc-400 truncate">{watchState.title}</div>}
+                  {watchState.currentAction && <div className="text-xs text-zinc-500 italic">{watchState.currentAction}</div>}
+                  {watchState.screenshotDataUrl && (
+                    <img src={watchState.screenshotDataUrl} alt="Machine browser" className="w-full rounded border border-zinc-800" />
+                  )}
+                  {watchState.events?.length > 0 && (
+                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                      {watchState.events.slice(0, 10).map((ev: any, i: number) => (
+                        <div key={i} className="text-[10px] text-zinc-500 flex gap-1.5">
+                          <span className="text-zinc-600">{ev.eventType}</span>
+                          <span>{ev.actorType}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-xs text-zinc-600">No active machine run</div>
+              )}
+              {activeRunId && (
+                <div className="flex gap-2">
+                  <button onClick={() => electron?.browserRun.stop(activeRunId).then(() => { setActiveRunId(null); setWatchState(null); setBrowserMode('normal'); })}
+                    className="flex-1 text-xs py-1.5 rounded border border-red-800 text-red-400 hover:bg-red-900/20">
+                    Stop Run
+                  </button>
+                  <a href={`/browser/watch?runId=${activeRunId}`}
+                    className="flex-1 text-center text-xs py-1.5 rounded border border-zinc-700 text-zinc-400 hover:bg-zinc-800">
+                    Full View
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeTab ? (
             <div className="p-5 flex flex-col gap-5">
               <div className="space-y-3">

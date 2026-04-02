@@ -65,6 +65,38 @@ export type EntityType = typeof ENTITY_TYPE[number];
 export const SYNC_STATUS = ['idle', 'syncing', 'error'] as const;
 export type SyncStatus = typeof SYNC_STATUS[number];
 
+// ─── Browser Orchestration Enums ──────────────────────────────────────────────
+
+export const BROWSER_RUN_TYPE = [
+  'human-training', 'visible-agent-control', 'autonomous-automation',
+  'extraction', 'verification', 'site-learning', 'replay',
+] as const;
+export type BrowserRunType = typeof BROWSER_RUN_TYPE[number];
+
+export const BROWSER_RUN_MODE = ['training', 'assist', 'autonomous', 'watch'] as const;
+export type BrowserRunMode = typeof BROWSER_RUN_MODE[number];
+
+export const BROWSER_RUN_STATUS = ['pending', 'running', 'paused', 'completed', 'failed', 'cancelled'] as const;
+export type BrowserRunStatus = typeof BROWSER_RUN_STATUS[number];
+
+export const BROWSER_CONTEXT_TYPE = ['visible-electron', 'machine-playwright', 'machine-lightpanda'] as const;
+export type BrowserContextType = typeof BROWSER_CONTEXT_TYPE[number];
+
+export const BROWSER_VISIBILITY = ['visible', 'hidden', 'watch'] as const;
+export type BrowserVisibility = typeof BROWSER_VISIBILITY[number];
+
+export const SYNC_DIRECTION = ['visible-to-machine', 'machine-to-visible', 'none'] as const;
+export type SyncDirection = typeof SYNC_DIRECTION[number];
+
+export const SYNC_GRANULARITY = ['url-only', 'navigation-state', 'task-context', 'watch-only'] as const;
+export type SyncGranularity = typeof SYNC_GRANULARITY[number];
+
+export const TRUST_STATUS = ['trusted', 'suspicious', 'blocked', 'unreviewed'] as const;
+export type TrustStatus = typeof TRUST_STATUS[number];
+
+export const DETECTION_TYPE = ['selector', 'keyword', 'pattern', 'combined'] as const;
+export type DetectionType = typeof DETECTION_TYPE[number];
+
 // ─── Validation Helpers ───────────────────────────────────────────────────────
 
 export function validateId(id: unknown, fieldName: string): CommandResult<string> {

@@ -234,3 +234,147 @@ export const mailSyncState = sqliteTable('mail_sync_state', {
   errorMessage: text('error_message'),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
+
+// ─── Browser Orchestration ────────────────────────────────────────────────────
+
+export const browserContexts = sqliteTable('browser_contexts', {
+  id: text('id').primaryKey(),
+  browserType: text('browser_type').notNull(), // 'visible-electron' | 'machine-playwright' | 'machine-lightpanda'
+  contextKey: text('context_key').notNull(),
+  visibility: text('visibility').notNull(), // 'visible' | 'hidden' | 'watch'
+  sessionPartition: text('session_partition'),
+  status: text('status').notNull().default('idle'), // 'idle' | 'navigating' | 'extracting' | 'acting' | 'error' | 'disposed'
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  lastActivityAt: integer('last_activity_at', { mode: 'timestamp' }),
+}, (t) => ({
+  statusIdx: index('browser_contexts_status_idx').on(t.status),
+  typeIdx: index('browser_contexts_type_idx').on(t.browserType),
+}));
+
+export const browserRuns = sqliteTable('browser_runs', {
+  id: text('id').primaryKey(),
+  runType: text('run_type').notNull(), // 'human-training' | 'visible-agent-control' | 'autonomous-automation' | 'extraction' | 'verification' | 'site-learning' | 'replay'
+  mode: text('mode').notNull(), // 'training' | 'assist' | 'autonomous' | 'watch'
+  leaderBrowserType: text('leader_browser_type').notNull(),
+  leaderContextId: text('leader_context_id'),
+  followerBrowserType: text('follower_browser_type'),
+  followerContextId: text('follower_context_id'),
+  watchEnabled: integer('watch_enabled', { mode: 'boolean' }).default(false),
+  watchSurfaceType: text('watch_surface_type'), // 'tab' | 'panel' | 'page'
+  status: text('status').notNull().default('pending'), // 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
+  linkedCompanyId: text('linked_company_id'),
+  linkedTaskId: text('linked_task_id'),
+  linkedThreadId: text('linked_thread_id'),
+  linkedMessageId: text('linked_message_id'),
+  targetUrl: text('target_url'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  startedAt: integer('started_at', { mode: 'timestamp' }),
+  completedAt: integer('completed_at', { mode: 'timestamp' }),
+  error: text('error'),
+}, (t) => ({
+  statusIdx: index('browser_runs_status_idx').on(t.status),
+  leaderContextIdx: index('browser_runs_leader_context_idx').on(t.leaderContextId),
+  runTypeIdx: index('browser_runs_run_type_idx').on(t.runType),
+  createdAtIdx: index('browser_runs_created_at_idx').on(t.createdAt),
+}));
+
+export const browserRunEvents = sqliteTable('browser_run_events', {
+  id: text('id').primaryKey(),
+  browserRunId: text('browser_run_id').notNull().references(() => browserRuns.id),
+  eventType: text('event_type').notNull(), // 'navigate' | 'extract' | 'action' | 'watch-enable' | 'watch-disable' | 'leader-assign' | 'error' | 'complete' | 'pause' | 'resume'
+  contextId: text('context_id'),
+  actorType: text('actor_type').notNull(), // 'human' | 'machine' | 'system'
+  payloadJson: text('payload_json', { mode: 'json' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+}, (t) => ({
+  runIdIdx: index('browser_run_events_run_id_idx').on(t.browserRunId),
+  createdAtIdx: index('browser_run_events_created_at_idx').on(t.createdAt),
+}));
+
+export const browserSyncLinks = sqliteTable('browser_sync_links', {
+  id: text('id').primaryKey(),
+  browserRunId: text('browser_run_id').notNull().references(() => browserRuns.id),
+  sourceContextId: text('source_context_id').notNull(),
+  targetContextId: text('target_context_id').notNull(),
+  syncDirection: text('sync_direction').notNull(), // 'visible-to-machine' | 'machine-to-visible' | 'none'
+  syncGranularity: text('sync_granularity').notNull(), // 'url-only' | 'navigation-state' | 'task-context' | 'watch-only'
+  syncStatus: text('sync_status').notNull().default('active'), // 'active' | 'paused' | 'closed'
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+}, (t) => ({
+  runIdIdx: index('browser_sync_links_run_id_idx').on(t.browserRunId),
+}));
+
+// ─── Site Profiles & Training ─────────────────────────────────────────────────
+
+export const siteProfiles = sqliteTable('site_profiles', {
+  id: text('id').primaryKey(),
+  domain: text('domain').notNull().unique(),
+  siteType: text('site_type'), // 'company-website' | 'news' | 'social' | 'directory' | 'other'
+  trustStatus: text('trust_status').notNull().default('unreviewed'), // 'trusted' | 'suspicious' | 'blocked' | 'unreviewed'
+  approvedByUser: integer('approved_by_user', { mode: 'boolean' }).default(false),
+  notes: text('notes'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+}, (t) => ({
+  trustStatusIdx: index('site_profiles_trust_status_idx').on(t.trustStatus),
+}));
+
+export const fieldProfiles = sqliteTable('field_profiles', {
+  id: text('id').primaryKey(),
+  siteProfileId: text('site_profile_id').references(() => siteProfiles.id),
+  fieldName: text('field_name').notNull(),
+  description: text('description'),
+  detectionType: text('detection_type').notNull(), // 'selector' | 'keyword' | 'pattern' | 'combined'
+  keywordRulesJson: text('keyword_rules_json', { mode: 'json' }),
+  selectorRulesJson: text('selector_rules_json', { mode: 'json' }),
+  extractionHintsJson: text('extraction_hints_json', { mode: 'json' }),
+  confidenceRulesJson: text('confidence_rules_json', { mode: 'json' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+}, (t) => ({
+  siteProfileIdx: index('field_profiles_site_profile_idx').on(t.siteProfileId),
+}));
+
+export const automationRecipes = sqliteTable('automation_recipes', {
+  id: text('id').primaryKey(),
+  siteProfileId: text('site_profile_id').references(() => siteProfiles.id),
+  name: text('name').notNull(),
+  description: text('description'),
+  triggerType: text('trigger_type').notNull(), // 'manual' | 'on-visit' | 'scheduled' | 'event-driven'
+  stepsJson: text('steps_json', { mode: 'json' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+}, (t) => ({
+  siteProfileIdx: index('automation_recipes_site_profile_idx').on(t.siteProfileId),
+}));
+
+export const browserAnnotations = sqliteTable('browser_annotations', {
+  id: text('id').primaryKey(),
+  siteProfileId: text('site_profile_id').references(() => siteProfiles.id),
+  browserRunId: text('browser_run_id').references(() => browserRuns.id),
+  pageUrl: text('page_url').notNull(),
+  annotationType: text('annotation_type').notNull(), // 'element' | 'text-selection' | 'page' | 'field-hint' | 'warning'
+  selectionDataJson: text('selection_data_json', { mode: 'json' }).notNull(),
+  note: text('note'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+}, (t) => ({
+  pageUrlIdx: index('browser_annotations_page_url_idx').on(t.pageUrl),
+  siteProfileIdx: index('browser_annotations_site_profile_idx').on(t.siteProfileId),
+}));
+
+export const browserActionButtons = sqliteTable('browser_action_buttons', {
+  id: text('id').primaryKey(),
+  siteProfileId: text('site_profile_id').references(() => siteProfiles.id),
+  label: text('label').notNull(),
+  description: text('description'),
+  actionType: text('action_type').notNull(), // 'navigate' | 'extract' | 'fill-form' | 'click' | 'recipe'
+  actionPayloadJson: text('action_payload_json', { mode: 'json' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+}, (t) => ({
+  siteProfileIdx: index('browser_action_buttons_site_profile_idx').on(t.siteProfileId),
+}));

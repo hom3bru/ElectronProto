@@ -14,7 +14,10 @@ import { OutreachService } from '../packages/services/outreach.service';
 import { EvidenceService } from '../packages/services/evidence.service';
 import { LinkService } from '../packages/services/link.service';
 import { LoggerService } from '../packages/services/logger.service';
+import { BrowserRunService } from '../packages/services/browser-run.service';
+import { TrainingService } from '../packages/services/training.service';
 import { CommandResult } from '../packages/shared/command';
+import { BrowserOrchestrator } from './browser-orchestrator';
 
 // Repositories
 import { CrmRepository } from '../packages/repositories/crm.repository';
@@ -24,6 +27,7 @@ import { OutreachRepository } from '../packages/repositories/outreach.repository
 import { EvidenceRepository } from '../packages/repositories/evidence.repository';
 import { NotebookRepository } from '../packages/repositories/notebook.repository';
 import { GraphRepository } from '../packages/repositories/graph.repository';
+import { SiteProfileRepository } from '../packages/repositories/site-profile.repository';
 
 interface LogConfig {
   entityType?: string;
@@ -79,7 +83,11 @@ async function handle<T>(
   }
 }
 
-export function setupIpcHandlers(uiWebContents: WebContents, browserManager: BrowserManager) {
+export function setupIpcHandlers(
+  uiWebContents: WebContents,
+  browserManager: BrowserManager,
+  orchestrator?: BrowserOrchestrator
+) {
 
   // ─── Sync Engine Init ────────────────────────────────────────────────────────
   let syncEngine: SyncEngine | null = null;
@@ -332,5 +340,59 @@ export function setupIpcHandlers(uiWebContents: WebContents, browserManager: Bro
   // ─── Notebook / Audit ────────────────────────────────────────────────────────
   ipcMain.handle('notebook:getEntries', async (e, filters) => handle(() => NotebookRepository.getEntries(filters)));
   ipcMain.handle('audit:getCommandLog', async (e, entityId) => handle(() => NotebookRepository.getCommandLog(entityId)));
+
+  // ─── Browser Run ─────────────────────────────────────────────────────────────
+  ipcMain.handle('browserRun:create', async (e, input) =>
+    handle(() => BrowserRunService.createRun(input)));
+  ipcMain.handle('browserRun:start', async (e, input) =>
+    handle(() => orchestrator ? orchestrator.createAndStartRun(input) : BrowserRunService.createRun(input)));
+  ipcMain.handle('browserRun:stop', async (e, runId) =>
+    handle(() => orchestrator ? orchestrator.stopRun(runId) : BrowserRunService.stopRun(runId)));
+  ipcMain.handle('browserRun:list', async () =>
+    handle(() => BrowserRunService.listActiveRuns()));
+  ipcMain.handle('browserRun:get', async (e, runId) =>
+    handle(() => BrowserRunService.getRunWithEvents(runId)));
+  ipcMain.handle('browserRun:enableWatch', async (e, runId) =>
+    handle(() => orchestrator ? orchestrator.enableWatch(runId) : BrowserRunService.enableWatch(runId)));
+  ipcMain.handle('browserRun:disableWatch', async (e, runId) =>
+    handle(() => orchestrator ? orchestrator.disableWatch(runId) : BrowserRunService.disableWatch(runId)));
+  ipcMain.handle('browserRun:watchSnapshot', async (e, runId) =>
+    handle(() => orchestrator ? orchestrator.getWatchSnapshot(runId) : BrowserRunService.getRunWithEvents(runId)));
+  ipcMain.handle('browserRun:setMode', async (e, runId, mode) =>
+    handle(() => BrowserRunService.setRunMode(runId, mode)));
+  ipcMain.handle('browserRun:navigate', async (e, runId, url) =>
+    handle(() => orchestrator ? orchestrator.executeNavigation(runId, url) : Promise.resolve({ ok: false, error: { code: 'NO_ORCHESTRATOR', message: 'Orchestrator not available' } })));
+
+  // ─── Training ────────────────────────────────────────────────────────────────
+  ipcMain.handle('training:approveSite', async (e, domain, notes) =>
+    handle(() => TrainingService.approveSite(domain, notes)));
+  ipcMain.handle('training:createSiteProfile', async (e, input) =>
+    handle(() => TrainingService.createSiteProfile(input)));
+  ipcMain.handle('training:updateSiteProfile', async (e, id, patch) =>
+    handle(() => TrainingService.updateSiteProfile(id, patch)));
+  ipcMain.handle('training:createFieldProfile', async (e, input) =>
+    handle(() => TrainingService.createFieldProfile(input)));
+  ipcMain.handle('training:updateFieldKeywordRules', async (e, id, rules) =>
+    handle(() => TrainingService.updateFieldKeywordRules(id, rules)));
+  ipcMain.handle('training:updateFieldSelectorRules', async (e, id, rules) =>
+    handle(() => TrainingService.updateFieldSelectorRules(id, rules)));
+  ipcMain.handle('training:createAutomationRecipe', async (e, input) =>
+    handle(() => TrainingService.createAutomationRecipe(input)));
+  ipcMain.handle('training:updateAutomationRecipe', async (e, id, patch) =>
+    handle(() => TrainingService.updateAutomationRecipe(id, patch)));
+  ipcMain.handle('training:createAnnotation', async (e, input) =>
+    handle(() => TrainingService.createAnnotation(input)));
+  ipcMain.handle('training:createActionButton', async (e, input) =>
+    handle(() => TrainingService.createActionButton(input)));
+  ipcMain.handle('training:getSiteProfileForUrl', async (e, url) =>
+    handle(() => TrainingService.getSiteProfileForUrl(url)));
+
+  // ─── Site Profiles ───────────────────────────────────────────────────────────
+  ipcMain.handle('siteProfile:list', async () =>
+    handle(() => TrainingService.listSiteProfiles()));
+  ipcMain.handle('siteProfile:get', async (e, id) =>
+    handle(() => TrainingService.getSiteProfile(id)));
+  ipcMain.handle('siteProfile:getByDomain', async (e, domain) =>
+    handle(() => TrainingService.getSiteProfileForUrl(domain)));
 
 }

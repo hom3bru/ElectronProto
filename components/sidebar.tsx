@@ -2,11 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Globe, Inbox, Building2, FileSearch, CheckSquare, BookOpen, Send, Settings } from 'lucide-react';
+import { Globe, Inbox, Building2, FileSearch, CheckSquare, BookOpen, Send, Settings, Activity, ShieldCheck } from 'lucide-react';
 import { clsx } from 'clsx';
 
 const navItems = [
   { name: 'Browser', href: '/browser', icon: Globe },
+  { name: 'Runs', href: '/browser/runs', icon: Activity },
+  { name: 'Sites', href: '/browser/sites', icon: ShieldCheck },
   { name: 'Inbox', href: '/inbox', icon: Inbox },
   { name: 'CRM', href: '/crm', icon: Building2 },
   { name: 'Evidence', href: '/evidence', icon: FileSearch },

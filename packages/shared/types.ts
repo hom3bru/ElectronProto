@@ -122,3 +122,121 @@ export interface Draft {
   updatedAt: Date;
   sentAt: Date | null;
 }
+
+// ─── Browser Orchestration Types ──────────────────────────────────────────────
+
+export interface BrowserContext {
+  id: string;
+  browserType: string;
+  contextKey: string;
+  visibility: string;
+  sessionPartition: string | null;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  lastActivityAt: Date | null;
+}
+
+export interface BrowserRun {
+  id: string;
+  runType: string;
+  mode: string;
+  leaderBrowserType: string;
+  leaderContextId: string | null;
+  followerBrowserType: string | null;
+  followerContextId: string | null;
+  watchEnabled: boolean | null;
+  watchSurfaceType: string | null;
+  status: string;
+  linkedCompanyId: string | null;
+  linkedTaskId: string | null;
+  linkedThreadId: string | null;
+  linkedMessageId: string | null;
+  targetUrl: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  startedAt: Date | null;
+  completedAt: Date | null;
+  error: string | null;
+}
+
+export interface BrowserRunEvent {
+  id: string;
+  browserRunId: string;
+  eventType: string;
+  contextId: string | null;
+  actorType: string;
+  payloadJson: any | null;
+  createdAt: Date;
+}
+
+export interface BrowserSyncLink {
+  id: string;
+  browserRunId: string;
+  sourceContextId: string;
+  targetContextId: string;
+  syncDirection: string;
+  syncGranularity: string;
+  syncStatus: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface SiteProfile {
+  id: string;
+  domain: string;
+  siteType: string | null;
+  trustStatus: string;
+  approvedByUser: boolean | null;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface FieldProfile {
+  id: string;
+  siteProfileId: string | null;
+  fieldName: string;
+  description: string | null;
+  detectionType: string;
+  keywordRulesJson: any | null;
+  selectorRulesJson: any | null;
+  extractionHintsJson: any | null;
+  confidenceRulesJson: any | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface AutomationRecipe {
+  id: string;
+  siteProfileId: string | null;
+  name: string;
+  description: string | null;
+  triggerType: string;
+  stepsJson: any;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface BrowserAnnotation {
+  id: string;
+  siteProfileId: string | null;
+  browserRunId: string | null;
+  pageUrl: string;
+  annotationType: string;
+  selectionDataJson: any;
+  note: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface BrowserActionButton {
+  id: string;
+  siteProfileId: string | null;
+  label: string;
+  description: string | null;
+  actionType: string;
+  actionPayloadJson: any;
+  createdAt: Date;
+  updatedAt: Date;
+}

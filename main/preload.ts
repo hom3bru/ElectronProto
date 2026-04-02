@@ -162,4 +162,53 @@ contextBridge.exposeInMainWorld('electron', {
     /** Returns all notebook entries for an entity — the agent's own action replay log. */
     getCommandLog: (entityId: string) => ipcRenderer.invoke('audit:getCommandLog', entityId),
   },
+
+  browserRun: {
+    create: (input: any) => ipcRenderer.invoke('browserRun:create', input),
+    start: (input: any) => ipcRenderer.invoke('browserRun:start', input),
+    stop: (runId: string) => ipcRenderer.invoke('browserRun:stop', runId),
+    list: () => ipcRenderer.invoke('browserRun:list'),
+    get: (runId: string) => ipcRenderer.invoke('browserRun:get', runId),
+    enableWatch: (runId: string) => ipcRenderer.invoke('browserRun:enableWatch', runId),
+    disableWatch: (runId: string) => ipcRenderer.invoke('browserRun:disableWatch', runId),
+    watchSnapshot: (runId: string) => ipcRenderer.invoke('browserRun:watchSnapshot', runId),
+    setMode: (runId: string, mode: string) => ipcRenderer.invoke('browserRun:setMode', runId, mode),
+    navigate: (runId: string, url: string) => ipcRenderer.invoke('browserRun:navigate', runId, url),
+    onWatchUpdate: (callback: (state: any) => void) => {
+      const listener = (_e: any, state: any) => callback(state);
+      ipcRenderer.on('browserRun:watchUpdate', listener);
+      return () => ipcRenderer.removeListener('browserRun:watchUpdate', listener);
+    },
+  },
+
+  training: {
+    approveSite: (domain: string, notes?: string) =>
+      ipcRenderer.invoke('training:approveSite', domain, notes),
+    createSiteProfile: (input: any) =>
+      ipcRenderer.invoke('training:createSiteProfile', input),
+    updateSiteProfile: (id: string, patch: any) =>
+      ipcRenderer.invoke('training:updateSiteProfile', id, patch),
+    createFieldProfile: (input: any) =>
+      ipcRenderer.invoke('training:createFieldProfile', input),
+    updateFieldKeywordRules: (id: string, rules: any) =>
+      ipcRenderer.invoke('training:updateFieldKeywordRules', id, rules),
+    updateFieldSelectorRules: (id: string, rules: any) =>
+      ipcRenderer.invoke('training:updateFieldSelectorRules', id, rules),
+    createAutomationRecipe: (input: any) =>
+      ipcRenderer.invoke('training:createAutomationRecipe', input),
+    updateAutomationRecipe: (id: string, patch: any) =>
+      ipcRenderer.invoke('training:updateAutomationRecipe', id, patch),
+    createAnnotation: (input: any) =>
+      ipcRenderer.invoke('training:createAnnotation', input),
+    createActionButton: (input: any) =>
+      ipcRenderer.invoke('training:createActionButton', input),
+    getSiteProfileForUrl: (url: string) =>
+      ipcRenderer.invoke('training:getSiteProfileForUrl', url),
+  },
+
+  siteProfile: {
+    list: () => ipcRenderer.invoke('siteProfile:list'),
+    get: (id: string) => ipcRenderer.invoke('siteProfile:get', id),
+    getByDomain: (domain: string) => ipcRenderer.invoke('siteProfile:getByDomain', domain),
+  },
 });
