@@ -11,7 +11,8 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "react-jsx",
+    "jsx": "preserve",
+    "jsxImportSource": "react",
     "incremental": true,
     "plugins": [
       {
@@ -21,8 +22,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"]
-    },
-    "types": ["node", "react", "react-dom"]
+    }
   },
   "include": [
     "next-env.d.ts",
@@ -33,7 +33,7 @@
     "hooks/**/*.ts",
     "hooks/**/*.tsx",
     "lib/**/*.ts",
-    "packages/shared/**/*.ts",
+    "packages/**/*.ts",
     ".next/types/**/*.ts"
   ],
   "exclude": ["node_modules", "main", "dist-main"]

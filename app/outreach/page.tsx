@@ -11,18 +11,22 @@ export default function OutreachPage() {
   useEffect(() => {
     const loadDrafts = async () => {
       if (electron) {
-        const drfts = await electron.outreach.getDrafts();
-        setDrafts(drfts);
+        const res = await electron.outreach.getDrafts();
+        if (res.ok) {
+          setDrafts(res.data);
+        }
       }
     };
     loadDrafts();
   }, [electron]);
 
-  const handleAction = async (command: string, draftId: string) => {
+  const doAction = async (action: () => Promise<any>) => {
     if (!electron) return;
-    await electron.cmd.execute(command, { draftId });
-    const drfts = await electron.outreach.getDrafts();
-    setDrafts(drfts);
+    await action();
+    const res = await electron.outreach.getDrafts();
+    if (res.ok) {
+      setDrafts(res.data);
+    }
   };
 
   return (
@@ -68,7 +72,7 @@ export default function OutreachPage() {
                     <Edit3 className="w-4 h-4" /> Edit
                   </button>
                   <button 
-                    onClick={() => handleAction('approveDraft', draft.id)}
+                    onClick={() => doAction(() => electron.outreach.approveDraft(draft.id))}
                     className="px-3 py-1.5 bg-blue-900/30 text-blue-400 hover:bg-blue-900/50 rounded text-sm font-medium transition-colors flex items-center gap-2"
                   >
                     <Check className="w-4 h-4" /> Approve
@@ -77,7 +81,7 @@ export default function OutreachPage() {
               )}
               {draft.status === 'approved' && (
                 <button 
-                  onClick={() => handleAction('sendDraft', draft.id)}
+                  onClick={() => doAction(() => electron.outreach.sendDraft(draft.id))}
                   className="px-3 py-1.5 bg-emerald-900/30 text-emerald-400 hover:bg-emerald-900/50 rounded text-sm font-medium transition-colors flex items-center gap-2"
                 >
                   <Send className="w-4 h-4" /> Send Now

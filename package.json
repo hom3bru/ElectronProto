@@ -9,11 +9,12 @@
     "start": "next start",
     "lint": "eslint .",
     "clean": "node -e \"const fs=require('fs');['.next','out','dist-main'].forEach(d=>{try{fs.rmSync(d,{recursive:true,force:true})}catch(e){}});console.log('Cleaned');\"",
-    "electron:dev": "concurrently -k \"next dev\" \"wait-on http://localhost:3000 && tsc -p tsconfig.main.json && electron .\"",
-    "electron:build": "next build && tsc -p tsconfig.main.json && electron-builder",
+    "electron:dev": "concurrently -k \"next dev\" \"wait-on http://localhost:3000 && tsc -p tsconfig.main.json && cross-env NODE_ENV=development electron .\"",
+    "electron:build": "next build && tsc -p tsconfig.main.json && cross-env NODE_ENV=production electron-builder",
     "db:migrate": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:seed": "tsx db/seed.ts"
+    "db:seed": "tsx db/seed.ts",
+    "postinstall": "electron-rebuild"
   },
   "dependencies": {
     "@google/genai": "^1.17.0",

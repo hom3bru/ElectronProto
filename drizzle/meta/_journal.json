@@ -8,6 +8,48 @@
       "when": 1775055576092,
       "tag": "0000_tired_hex",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1775057027580,
+      "tag": "0001_amazing_blur",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1775057075385,
+      "tag": "0002_open_dazzler",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1775073623691,
+      "tag": "0003_common_silver_sable",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1775175600000,
+      "tag": "0004_schema_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1775175900000,
+      "tag": "0005_hardened_forensic_declutter",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1775086870755,
+      "tag": "0006_navigation_crash_fix",
+      "breakpoints": true
     }
   ]
 }

@@ -1,67 +1,54 @@
-# Internal Agent Workspace
+# Forensic Workspace
 
-## 1. What this app is
-A local-first desktop application built as an internal agent workspace for startup discovery, qualification, enrichment, evidence gathering, inbox operations, and outreach.
+Forensic CRM and Intelligence Workstation. Built on an **Entity-Link Graph** for auditable, forensic-grade research and communication. Developed with Next.js, Electron, and Drizzle ORM.
 
-## 2. Architecture overview
-- **Desktop Runtime**: Electron
-- **Frontend**: Next.js (App Router) with Tailwind CSS
-- **Database**: SQLite (better-sqlite3) with Drizzle ORM
-- **Browser Surface**: Electron `WebContentsView` for isolated, multi-tab browsing.
-- **Communication**: IPC bridges between the Next.js renderer and Electron main process.
+## Architecture: Forensic Entity Graph
 
-## 3. Folder structure
-- `/main/`: Electron main process, IPC handlers, and Browser Manager.
-- `/app/`: Next.js renderer application.
-- `/components/`: Reusable React components.
-- `/db/`: SQLite schema, migrations, and seed scripts.
-- `/packages/shared/`: Shared TypeScript types.
-- `/packages/mail/`: Mail provider interfaces and mock implementations.
-- `/packages/commands/`: Internal command handlers.
+Unlike traditional CRMs that rely on static foreign keys, this system uses an **Atomic Relationship Graph** (`entity_links`).
 
-## 4. How to run locally
-1. Install dependencies: `npm install`
-2. Push database schema: `npm run db:migrate`
-3. Seed database: `npm run db:seed`
-4. Start desktop app: `npm run electron:dev`
+- **Forensic Integrity**: Every association (Evidence → Company, Tab → Task) is a first-class citizen.
+- **Auditable Unlinking**: Removing a link generates a signed notebook entry for chain-of-custody.
+- **Multi-Tenant Isolation**: All browser sessions are sandboxed via the Electron `user-` partition namespace.
 
-*(Note: `npm run dev` starts only the web renderer for preview purposes. The browser tabs require the Electron environment.)*
+## Getting Started (Development)
 
-## 5. Production Build
-To build the packaged application:
-`npm run electron:build`
+### 1. Prerequisites
 
-**Production Loading Path**:
-The application uses Next.js static export (`output: 'export'`). During the build process, Next.js generates static HTML/JS/CSS files in the `out/` directory. The Electron main process loads `out/index.html` in production, ensuring that the Next.js renderer works correctly within the packaged Electron app without needing a separate Node.js server.
+- **Node.js**: lts/iron (v20+)
+- **OS**: Windows (optimized), macOS (universal), Linux
 
-## 5. Database schema summary
-- `companies`, `contacts`: CRM core.
-- `messages`, `threads`: Inbox storage.
-- `browser_tabs`: Tracks active and historical browser sessions.
-- `evidence_fragments`: Extracted claims and quotes.
-- `tasks`: Workflow and escalation queue.
-- `notebook_entries`: Audit log.
-- `drafts`: Outreach staging.
+### 2. Installation
 
-## 6. Where browser logic lives
-- Main process: `/main/browser-manager.ts`
-- Renderer UI: `/app/browser/page.tsx`
+```powershell
+# Clone and install dependencies
+git clone <repository-url>
+npm install
+```
 
-## 7. Where inbox logic lives
-- UI: `/app/inbox/page.tsx`
-- Providers: `/packages/mail/`
+*Note: `electron-rebuild` runs automatically on install to sync native SQLite drivers with the Electron ABI.*
 
-## 8. Where CRM logic lives
-- UI: `/app/crm/page.tsx`
-- Schema: `/db/schema.ts`
+### 3. Local Development
 
-## 9. Where notebook and task logic lives
-- UI: `/app/notebook/page.tsx`, `/app/tasks/page.tsx`
+```powershell
+# Start Next.js and Electron shell
+npm run electron:dev
+```
 
-## 10. Replace mocks with real providers
-Implement the `MailProvider` interface in `/packages/mail/provider.ts` for Gmail or IMAP, and wire it up in the main process to ingest messages into SQLite.
+## Production Packaging
 
-## 11. Next integration steps
-- Implement Gmail push ingestion.
-- Add AI extraction commands to the browser side drawer.
-- Connect the outreach draft system to an SMTP sender.
+To generate a distributable build for your local OS:
+
+```powershell
+npm run electron:build
+```
+
+Builds are output to the `release/` directory. The production loader is asar-aware and correctly resolves static assets from the `out/` export folder.
+
+---
+
+## 🛠️ Security Hardening
+
+- **IPC Lockdown**: Strictly validates URL schemes (http/https only) and sanitizes session partitions.
+- **Navigation Control**: Prevents remote pages from navigating to `file://` or `chrome://` protocols using `will-navigate` listeners.
+- **Zero-Trust Bridge**: Privileged database operations (migrations, legacy links) are removed from the renderer bridge.
+- **Geometry Clamping**: Prevents rogue renderer code from obfuscating state or overlapping system UI.

@@ -5,3 +5,8 @@ coverage/
 *.log
 .env*
 !.env.example
+dist-main/
+out/
+*.db
+tsconfig.tsbuildinfo
+

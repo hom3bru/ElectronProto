@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { Message, Thread } from '@/packages/shared/types';
 import { format } from 'date-fns';
-import { Mail, Reply, Archive, Tag, AlertCircle, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Mail, Reply, Archive, Tag, AlertCircle, RefreshCw, CheckCircle2, Search } from 'lucide-react';
 
 export default function InboxPage() {
   const [threads, setThreads] = useState<any[]>([]);
@@ -20,30 +20,35 @@ export default function InboxPage() {
   const [showLabelMenu, setShowLabelMenu] = useState<string | null>(null);
   const [showCompanyMenu, setShowCompanyMenu] = useState<string | null>(null);
   const [newLabelName, setNewLabelName] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchThreadIds, setSearchThreadIds] = useState<Set<string> | null>(null);
 
   const electron = typeof window !== 'undefined' ? (window as any).electron : null;
 
   const loadData = useCallback(async () => {
     if (electron) {
-      const ths = await electron.inbox.getThreads();
-      const lbls = await electron.inbox.getLabels();
-      const msgLabels = await electron.inbox.getMessageLabels();
-      const comps = await electron.crm.getCompanies();
-      setThreads(ths);
-      setAllLabels(lbls);
-      setMessageLabels(msgLabels);
-      setAllCompanies(comps);
+      const [threadsRes, labelsRes, msgLabelsRes, companiesRes] = await Promise.all([
+        electron.inbox.getThreads(),
+        electron.inbox.getLabels(),
+        electron.inbox.getMessageLabels(),
+        electron.crm.getCompanies()
+      ]);
+
+      if (threadsRes.ok) setThreads(threadsRes.data);
+      if (labelsRes.ok) setAllLabels(labelsRes.data);
+      if (msgLabelsRes.ok) setMessageLabels(msgLabelsRes.data);
+      if (companiesRes.ok) setAllCompanies(companiesRes.data);
     }
   }, [electron]);
 
   const loadThreadContext = useCallback(async (threadId: string) => {
     if (!electron) return;
-    const context = await electron.inbox.getThreadContext(threadId);
-    if (context) {
-      setMessages(context.messages);
-      setLinkedCompanies(context.companies);
-      setLinkedEvidence(context.evidence);
-      setThreadDrafts(context.drafts);
+    const res = await electron.inbox.getThreadContext(threadId);
+    if (res.ok && res.data) {
+      setMessages(res.data.messages);
+      setLinkedCompanies(res.data.companies);
+      setLinkedEvidence(res.data.evidence);
+      setThreadDrafts(res.data.drafts);
     }
   }, [electron]);
 
@@ -63,18 +68,39 @@ export default function InboxPage() {
     }
   }, [selectedThreadId, loadThreadContext]);
 
+  useEffect(() => {
+    if (!electron) return;
+    if (!searchQuery.trim()) {
+      setSearchThreadIds(null);
+      return;
+    }
+    const debounce = setTimeout(async () => {
+      const res = await electron.inbox.search(searchQuery.trim());
+      if (res.ok) {
+        setSearchThreadIds(new Set(res.data.map((r: any) => r.threadId)));
+      }
+    }, 300);
+    return () => clearTimeout(debounce);
+  }, [searchQuery, electron]);
+
   const handleIngest = async () => {
     if (!electron) return;
     setIsIngesting(true);
-    await electron.cmd.execute('ingestMail', {});
+    // Since ingestMail was part of the old command registry and we removed it, we'll map it to inbox.sync
+    await electron.inbox.sync();
     await loadData();
     setIsIngesting(false);
   };
 
-  const handleAction = async (command: string, payload: any) => {
+  // Replaced generic handleAction with explicit typed calls where needed.
+  // Kept a small proxy wrapper for loadData refreshes on UI actions:
+  const doAction = async (action: () => Promise<any>) => {
     if (!electron) return;
-    await electron.cmd.execute(command, payload);
+    await action();
     await loadData();
+    if (selectedThreadId) {
+      await loadThreadContext(selectedThreadId);
+    }
   };
 
   const activeThreadMessages = useMemo(() => {
@@ -82,9 +108,14 @@ export default function InboxPage() {
   }, [messages]);
 
   const threadList = useMemo(() => {
-    return threads
+    let list = threads
       .filter(t => (filter === 'active' ? t.status !== 'archived' : t.status === 'archived'));
-  }, [threads, filter]);
+    
+    if (searchThreadIds) {
+      list = list.filter(t => searchThreadIds.has(t.id));
+    }
+    return list;
+  }, [threads, filter, searchThreadIds]);
 
   const handleSelectThread = async (threadId: string) => {
     setSelectedThreadId(threadId);
@@ -92,7 +123,8 @@ export default function InboxPage() {
     // Mark messages in the newly focused thread as read handled by command
     const thread = threads.find(t => t.id === threadId);
     if (thread && thread.unreadCount > 0) {
-      await electron.cmd.execute('markThreadRead', { threadId });
+      // Delegating the full lifecycle transition state securely.
+      await electron.inbox.markThreadRead(threadId);
       await loadData();
     }
   };
@@ -121,6 +153,18 @@ export default function InboxPage() {
           >
             <RefreshCw className={`w-4 h-4 ${isIngesting ? 'animate-spin' : ''}`} />
           </button>
+        </div>
+        <div className="p-2 border-b border-zinc-800 bg-zinc-900/30">
+          <div className="relative">
+            <Search className="w-3 h-3 absolute left-2 top-2 text-zinc-500" />
+            <input 
+              type="text" 
+              placeholder="Search subjects, content..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded pl-7 pr-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700"
+            />
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto">
           {threadList.map((thread) => (
@@ -169,7 +213,7 @@ export default function InboxPage() {
                 {filter === 'active' && (
                   <button 
                     onClick={() => {
-                      handleAction('archiveThread', { threadId: selectedThreadId });
+                      doAction(() => electron.inbox.archiveThread(selectedThreadId));
                       setSelectedThreadId(null);
                     }}
                     className="p-2 bg-zinc-900 hover:bg-zinc-800 rounded-md text-zinc-400 hover:text-zinc-100 transition-colors"
@@ -237,7 +281,7 @@ export default function InboxPage() {
                               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: label.color }}></span>
                               {label.name}
                               <button 
-                                onClick={() => handleAction('removeLabelFromMessage', { messageId: msg.id, labelId: label.id })}
+                                onClick={() => doAction(() => electron.inbox.removeLabelFromMessage(msg.id, label.id))}
                                 className="ml-1 text-zinc-500 hover:text-zinc-300"
                               >×</button>
                             </span>
@@ -277,7 +321,7 @@ export default function InboxPage() {
                   {index === activeThreadMessages.length - 1 && (
                     <div className="p-4 border-t border-zinc-800 bg-zinc-900/30 flex gap-3 flex-wrap relative">
                       <button 
-                        onClick={() => handleAction('createCompanyFromMessage', { messageId: msg.id, name: msg.from, domain: msg.from.split('@')[1] })}
+                        onClick={() => doAction(() => electron.crm.createCompanyFromMessage(msg.id))}
                         className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded text-xs font-medium transition-colors"
                       >
                         Create Company
@@ -300,7 +344,7 @@ export default function InboxPage() {
                                   <button
                                     key={company.id}
                                     onClick={() => {
-                                      handleAction('linkMessageToCompany', { messageId: msg.id, companyId: company.id });
+                                      doAction(() => electron.crm.linkMessageToCompany(msg.id, company.id));
                                       setShowCompanyMenu(null);
                                     }}
                                     className="w-full text-left px-3 py-2 text-xs hover:bg-zinc-700 truncate"
@@ -315,13 +359,13 @@ export default function InboxPage() {
                       </div>
 
                       <button 
-                        onClick={() => handleAction('createEvidenceFromMessage', { messageId: msg.id, claimSummary: 'Evidence from email' })}
+                        onClick={() => doAction(() => electron.inbox.createEvidenceFromMessage(msg.id))}
                         className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded text-xs font-medium transition-colors"
                       >
                         Extract Evidence
                       </button>
                       <button 
-                        onClick={() => handleAction('createTask', { title: `Follow up with ${msg.from}`, type: 'follow-up', relatedEntityType: 'message', relatedEntityId: msg.id })}
+                        onClick={() => doAction(() => electron.tasks.createTask({ title: `Follow up with ${msg.from}`, type: 'follow-up', relatedEntityType: 'message', relatedEntityId: msg.id }))}
                         className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded text-xs font-medium transition-colors"
                       >
                         Create Task
@@ -346,7 +390,12 @@ export default function InboxPage() {
                                 className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none"
                                 onKeyDown={async (e) => {
                                   if (e.key === 'Enter' && newLabelName.trim()) {
-                                    await handleAction('createLabel', { name: newLabelName.trim() });
+                                    doAction(async () => {
+                                      const lblRes = await electron.inbox.createLabel(newLabelName.trim());
+                                      if (lblRes.ok) {
+                                        await electron.inbox.addLabelToMessage(msg.id, lblRes.data);
+                                      }
+                                    });
                                     setNewLabelName('');
                                   }
                                 }}
@@ -360,9 +409,9 @@ export default function InboxPage() {
                                     key={label.id}
                                     onClick={() => {
                                       if (isAssigned) {
-                                        handleAction('removeLabelFromMessage', { messageId: msg.id, labelId: label.id });
+                                        doAction(() => electron.inbox.removeLabelFromMessage(msg.id, label.id));
                                       } else {
-                                        handleAction('addLabelToMessage', { messageId: msg.id, labelId: label.id });
+                                        doAction(() => electron.inbox.addLabelToMessage(msg.id, label.id));
                                       }
                                     }}
                                     className="w-full text-left px-3 py-2 text-xs hover:bg-zinc-700 flex items-center gap-2"
@@ -379,7 +428,7 @@ export default function InboxPage() {
                       </div>
 
                       <button 
-                        onClick={() => handleAction('escalateMessage', { messageId: msg.id, reason: 'Manual escalation from inbox' })}
+                        onClick={() => doAction(() => electron.inbox.escalateMessage(msg.id))}
                         className="px-3 py-1.5 bg-red-950/30 text-red-400 hover:bg-red-900/50 rounded text-xs font-medium transition-colors ml-auto flex items-center gap-1"
                       >
                         <AlertCircle className="w-3 h-3" />
@@ -398,7 +447,7 @@ export default function InboxPage() {
                       <span className="text-xs text-blue-400 uppercase tracking-wider font-semibold">{draft.status}</span>
                       {draft.status === 'draft' && (
                         <button 
-                          onClick={() => handleAction('approveDraft', { draftId: draft.id })}
+                          onClick={() => doAction(() => electron.outreach.approveDraft(draft.id))}
                           className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium transition-colors"
                         >
                           Approve
@@ -406,7 +455,7 @@ export default function InboxPage() {
                       )}
                       {draft.status === 'approved' && (
                         <button 
-                          onClick={() => handleAction('sendDraft', { draftId: draft.id })}
+                          onClick={() => doAction(() => electron.outreach.sendDraft(draft.id))}
                           className="px-2 py-1 bg-green-600 hover:bg-green-500 text-white rounded text-xs font-medium transition-colors"
                         >
                           Send
@@ -420,12 +469,12 @@ export default function InboxPage() {
                         <input 
                           type="text" 
                           defaultValue={draft.subject}
-                          onBlur={(e) => handleAction('updateDraft', { draftId: draft.id, subject: e.target.value, body: draft.body })}
+                          onBlur={(e) => doAction(() => electron.outreach.updateDraft(draft.id, e.target.value, draft.body))}
                           className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
                         />
                         <textarea 
                           defaultValue={draft.body}
-                          onBlur={(e) => handleAction('updateDraft', { draftId: draft.id, subject: draft.subject, body: e.target.value })}
+                          onBlur={(e) => doAction(() => electron.outreach.updateDraft(draft.id, draft.subject, e.target.value))}
                           className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 min-h-[100px] focus:outline-none focus:border-blue-500"
                         />
                       </div>
@@ -443,11 +492,7 @@ export default function InboxPage() {
               {threadDrafts.length === 0 && (
                 <div className="pt-4">
                   <button 
-                    onClick={() => handleAction('createDraftFromThread', { 
-                      threadId: selectedThreadId, 
-                      subject: `Re: ${activeThreadMessages[0].subject}`, 
-                      body: 'Thank you for your message. We will get back to you shortly.' 
-                    })}
+                    onClick={() => doAction(() => electron.outreach.createDraftFromThread(selectedThreadId))}
                     className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-md text-sm font-medium transition-colors flex items-center gap-2"
                   >
                     <Reply className="w-4 h-4" />

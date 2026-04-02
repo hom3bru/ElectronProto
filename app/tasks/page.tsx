@@ -12,8 +12,10 @@ export default function TasksPage() {
   useEffect(() => {
     const loadTasks = async () => {
       if (electron) {
-        const tsks = await electron.tasks.getTasks();
-        setTasks(tsks);
+        const res = await electron.tasks.getTasks();
+        if (res.ok) {
+          setTasks(res.data);
+        }
       }
     };
     loadTasks();
@@ -21,9 +23,11 @@ export default function TasksPage() {
 
   const handleUpdateStatus = async (taskId: string, status: string) => {
     if (!electron) return;
-    await electron.cmd.execute('updateTaskStatus', { taskId, status });
-    const tsks = await electron.tasks.getTasks();
-    setTasks(tsks);
+    const res = await electron.tasks.updateTaskStatus(taskId, status);
+    if (res.ok) {
+        const refresh = await electron.tasks.getTasks();
+        if (refresh.ok) setTasks(refresh.data);
+    }
   };
 
   return (

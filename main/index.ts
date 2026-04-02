@@ -2,6 +2,7 @@ import { app, BrowserWindow, BaseWindow, WebContentsView } from 'electron';
 import * as path from 'path';
 import { setupIpcHandlers } from './ipc';
 import { BrowserManager } from './browser-manager';
+import { VerificationService } from '../packages/services/verification.service';
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
@@ -40,13 +41,15 @@ async function createWindow() {
     uiView.webContents.loadFile(path.join(__dirname, '../../out/index.html'));
   }
 
-  browserManager = new BrowserManager(mainWindow, uiView);
-  
   // Restore saved tabs in the main process before the renderer gets to interact.
   const notify = (channel: string, ...args: any[]) => uiView.webContents.send(channel, ...args);
-  browserManager.restoreFromDatabase(notify).catch(console.error);
+  browserManager = new BrowserManager(mainWindow, uiView, notify);
+  browserManager.restoreFromDatabase().catch(console.error);
 
   setupIpcHandlers(uiView.webContents, browserManager);
+  
+  // Initialize Background Verification Service
+  VerificationService.init(mainWindow).catch(console.error);
 }
 
 app.whenReady().then(async () => {
@@ -54,8 +57,12 @@ app.whenReady().then(async () => {
   try {
     const { migrate } = require('drizzle-orm/better-sqlite3/migrator');
     const { db: database } = require('../db');
-    await migrate(database, { migrationsFolder: path.join(process.cwd(), 'drizzle') });
-    console.log('[DB] Migrations applied successfully');
+    const migrationsFolder = isDev
+      ? path.join(process.cwd(), 'drizzle')
+      : path.join(app.getAppPath(), 'drizzle');
+
+    await migrate(database, { migrationsFolder });
+    console.log(`[DB] Migrations applied from ${migrationsFolder}`);
   } catch (e) {
     console.error('[DB] Migration failed:', e);
   }

@@ -2,190 +2,335 @@ import { ipcMain, WebContents } from 'electron';
 import { BrowserManager } from './browser-manager';
 import { db } from '../db';
 import * as schema from '../db/schema';
-import { eq, desc, asc, and, inArray } from 'drizzle-orm';
-import { v4 as uuidv4 } from 'uuid';
-import { CommandRegistry } from '../packages/commands/registry';
+import { eq, desc, and } from 'drizzle-orm';
+import { SyncEngine } from '../packages/mail/sync-engine';
+import { MockMailProvider } from '../packages/mail/mock-provider';
+
+// Domain Services
+import { CrmService } from '../packages/services/crm.service';
+import { InboxService } from '../packages/services/inbox.service';
+import { TaskService } from '../packages/services/task.service';
+import { OutreachService } from '../packages/services/outreach.service';
+import { EvidenceService } from '../packages/services/evidence.service';
+import { LinkService } from '../packages/services/link.service';
+import { LoggerService } from '../packages/services/logger.service';
+import { CommandResult } from '../packages/shared/command';
+
+// Repositories
+import { CrmRepository } from '../packages/repositories/crm.repository';
+import { InboxRepository } from '../packages/repositories/inbox.repository';
+import { TaskRepository } from '../packages/repositories/task.repository';
+import { OutreachRepository } from '../packages/repositories/outreach.repository';
+import { EvidenceRepository } from '../packages/repositories/evidence.repository';
+import { NotebookRepository } from '../packages/repositories/notebook.repository';
+import { GraphRepository } from '../packages/repositories/graph.repository';
+
+interface LogConfig {
+  entityType?: string;
+  entityId?: string | ((data: any) => string);
+  entryType: string;
+  message: string | ((data: any) => string);
+  parentEntityType?: string;
+  parentEntityId?: string | ((data: any) => string);
+}
+
+// Every IPC handler returns a CommandResult envelope so the renderer and agents
+// can distinguish success from failure without catching exceptions.
+async function handle<T>(
+  fn: () => Promise<T>,
+  log?: LogConfig
+): Promise<CommandResult<T>> {
+  try {
+    const result = await fn();
+    let commandResult: CommandResult<T>;
+
+    // If the service already returned a CommandResult, forward it
+    if (result !== null && typeof result === 'object' && 'ok' in (result as any)) {
+      commandResult = result as any;
+    } else {
+      commandResult = { ok: true, data: result } as any;
+    }
+
+    // Systemic Forensic Logging
+    if (commandResult.ok && log) {
+      const entityId = typeof log.entityId === 'function' ? log.entityId(commandResult.data) : log.entityId;
+      const message = typeof log.message === 'function' ? log.message(commandResult.data) : log.message;
+      const parentEntityId = typeof log.parentEntityId === 'function' ? log.parentEntityId(commandResult.data) : log.parentEntityId;
+
+      if (entityId) {
+        await LoggerService.logNotebookEntry(
+          log.entityType || 'system',
+          entityId,
+          log.entryType,
+          message,
+          {
+            parentEntityType: log.parentEntityType,
+            parentEntityId: parentEntityId,
+            actorType: 'human'
+          }
+        );
+      }
+    }
+
+    return commandResult;
+  } catch (e: any) {
+    console.error('[IPC Error]', e);
+    return { ok: false, error: { code: 'INTERNAL_ERROR', message: e?.message || 'Unknown error' } };
+  }
+}
 
 export function setupIpcHandlers(uiWebContents: WebContents, browserManager: BrowserManager) {
-  const notify = (channel: string, ...args: any[]) => {
-    uiWebContents.send(channel, ...args);
-  };
 
-  // Browser IPC
-  ipcMain.handle('browser:createTab', async (e, { partition, url }) => {
-    const id = uuidv4();
-    browserManager.createTab(id, partition, url, notify);
-    await db.insert(schema.browserTabs).values({
-      id,
-      sessionPartition: partition,
-      url,
-      title: 'New Tab',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    return id;
-  });
-
-  ipcMain.handle('browser:restoreTab', async (e, { id, partition, url }) => {
-    browserManager.createTab(id, partition, url, notify);
-  });
-
-  ipcMain.handle('browser:switchTab', async (e, id) => {
-    browserManager.switchTab(id);
-    await db.update(schema.browserTabs).set({ active: false });
-    await db.update(schema.browserTabs).set({ active: true, lastFocusedTimestamp: new Date(), updatedAt: new Date() }).where(eq(schema.browserTabs.id, id));
-  });
-  
-  ipcMain.handle('browser:closeTab', async (e, id) => {
-    browserManager.closeTab(id);
-    await db.delete(schema.browserTabs).where(eq(schema.browserTabs.id, id));
-  });
-
-  ipcMain.handle('browser:updateTabOrder', async (e, tabIds: string[]) => {
-    for (let i = 0; i < tabIds.length; i++) {
-      await db.update(schema.browserTabs).set({ tabOrder: i, updatedAt: new Date() }).where(eq(schema.browserTabs.id, tabIds[i]));
+  // ─── Sync Engine Init ────────────────────────────────────────────────────────
+  let syncEngine: SyncEngine | null = null;
+  db.select().from(schema.mailAccounts).limit(1).then(([acc]) => {
+    if (acc) {
+      const provider = new MockMailProvider(acc.email);
+      syncEngine = new SyncEngine(provider, acc.id);
     }
-  });
+  }).catch(console.error);
 
+  // ─── Browser IPC ─────────────────────────────────────────────────────────────
+  ipcMain.handle('browser:createTab', async (e, partition, url) => handle(async () => {
+    // 1. Sanitize partition string and enforce user- prefix
+    const safePartition = `user-${String(partition).replace(/[^a-z0-9-]/gi, '') || 'default'}`;
+
+    // 2. Validate URL scheme
+    try {
+      const parsed = new URL(url);
+      if (!['https:', 'http:'].includes(parsed.protocol)) {
+        throw new Error('Disallowed URL scheme');
+      }
+    } catch {
+      throw new Error('URL must be http:// or https://');
+    }
+
+    return browserManager.createTab(safePartition, url);
+  }));
+
+  ipcMain.handle('browser:switchTab', async (e, id) => handle(() => browserManager.switchTab(id)));
+  ipcMain.handle('browser:closeTab', async (e, id) => handle(() => browserManager.closeTab(id)));
+  ipcMain.handle('browser:hide', () => browserManager.hideActiveTab());
   ipcMain.handle('browser:setBounds', (e, bounds) => browserManager.setBounds(bounds));
-  
-  ipcMain.handle('browser:navigate', async (e, { id, url }) => {
-    browserManager.navigate(id, url);
-    await db.update(schema.browserTabs).set({ url, updatedAt: new Date() }).where(eq(schema.browserTabs.id, id));
-  });
-
+  ipcMain.handle('browser:navigate', async (e, id, url) => handle(async () => {
+    try {
+      const parsed = new URL(url);
+      if (!['https:', 'http:'].includes(parsed.protocol)) {
+        throw new Error('Disallowed URL scheme');
+      }
+    } catch {
+      throw new Error('URL must be http:// or https://');
+    }
+    return browserManager.navigate(id, url);
+  }));
   ipcMain.handle('browser:goBack', (e, id) => browserManager.goBack(id));
   ipcMain.handle('browser:goForward', (e, id) => browserManager.goForward(id));
   ipcMain.handle('browser:reload', (e, id) => browserManager.reload(id));
-
-  // Command IPC
-  const commandRegistry = new CommandRegistry();
-  ipcMain.handle('cmd:execute', async (e, { commandName, payload }) => {
-    return await commandRegistry.execute(commandName, payload);
-  });
-
-  // ---- Typed Reads ----
-
-  ipcMain.handle('browser:getTabs', async () => {
-    return db.select().from(schema.browserTabs).orderBy(asc(schema.browserTabs.tabOrder));
-  });
-
-  ipcMain.handle('browser:getActiveTab', async () => {
-    const rows = await db.select().from(schema.browserTabs).where(eq(schema.browserTabs.active, true));
-    return rows[0] ?? null;
-  });
-
-  ipcMain.handle('browser:getTabContext', async (e, tabId: string) => {
+  ipcMain.handle('browser:getState', async () => browserManager.getState());
+  ipcMain.handle('browser:getTabContext', async (e, tabId: string) => handle(async () => {
     const [tab] = await db.select().from(schema.browserTabs).where(eq(schema.browserTabs.id, tabId));
     if (!tab) return null;
-    let linkedCompany = null;
-    let recentEvidence: any[] = [];
-    let recentTasks: any[] = [];
-    
-    if (tab.linkedCompanyId) {
-      linkedCompany = (await db.select().from(schema.companies).where(eq(schema.companies.id, tab.linkedCompanyId)))[0] ?? null;
+    let linkedCompany = null, recentEvidence: any[] = [], recentTasks: any[] = [];
+    // Resolve linked company via the forensic graph
+    const [link] = await db.select()
+      .from(schema.entityLinks)
+      .where(and(
+        eq(schema.entityLinks.sourceType, 'browser_tab'),
+        eq(schema.entityLinks.sourceId, tabId),
+        eq(schema.entityLinks.targetType, 'company')
+      )).limit(1);
+
+    if (link) {
+      linkedCompany = (await db.select().from(schema.companies).where(eq(schema.companies.id, link.targetId)))[0] ?? null;
       if (linkedCompany) {
-        recentEvidence = await db.select().from(schema.evidenceFragments)
-          .where(eq(schema.evidenceFragments.companyId, linkedCompany.id))
-          .orderBy(desc(schema.evidenceFragments.timestamp));
-        recentTasks = await db.select().from(schema.tasks)
-          .where(and(eq(schema.tasks.relatedEntityType, 'company'), eq(schema.tasks.relatedEntityId, linkedCompany.id)))
-          .orderBy(desc(schema.tasks.createdAt));
+        recentEvidence = await EvidenceRepository.getFragmentsByCompany(linkedCompany.id);
+        recentTasks = await TaskRepository.getTasksByEntity('company', linkedCompany.id);
       }
     }
     return { tab, linkedCompany, recentEvidence, recentTasks };
-  });
+  }));
 
-  // Inbox
-  ipcMain.handle('inbox:getThreads', async (e, archived) => {
-    const threads = await db.select().from(schema.threads).orderBy(desc(schema.threads.updatedAt));
-    
-    // Enrich with latest message and unread count
-    const enrichedThreads = await Promise.all(threads.map(async (thread) => {
-      const messages = await db.select().from(schema.messages).where(eq(schema.messages.threadId, thread.id)).orderBy(desc(schema.messages.receivedAt));
-      const latestMsg = messages[0];
-      const unreadCount = messages.filter(m => !m.readState).length;
-      return {
-        ...thread,
-        latestMsg,
-        unreadCount
-      };
+  // ─── Inbox: Queries ──────────────────────────────────────────────────────────
+  ipcMain.handle('inbox:sync', async () => handle(async () => {
+    if (!syncEngine) return { ok: false, error: { code: 'NOT_READY', message: 'No mail account configured' } };
+    await syncEngine.runSync();
+    return { ok: true, data: null };
+  }));
+
+  ipcMain.handle('inbox:getSyncStatus', async () => handle(() => InboxService.getSyncStatus()));
+  ipcMain.handle('inbox:getAccounts', async () => handle(async () =>
+    db.select({ id: schema.mailAccounts.id, email: schema.mailAccounts.email, provider: schema.mailAccounts.provider, displayName: schema.mailAccounts.displayName, isActive: schema.mailAccounts.isActive }).from(schema.mailAccounts)
+  ));
+  ipcMain.handle('inbox:getThreads', async (e, archived) => handle(() => InboxRepository.getThreads(archived)));
+  ipcMain.handle('inbox:search', async (e, query) => handle(() => InboxRepository.search(query)));
+  ipcMain.handle('inbox:getThreadContext', async (e, threadId) => handle(() => InboxRepository.getThreadContext(threadId)));
+  ipcMain.handle('inbox:getMessage', async (e, messageId) => handle(() => InboxService.getMessage(messageId)));
+  ipcMain.handle('inbox:getMessageLabels', async () => handle(() => InboxRepository.getMessageLabels()));
+  ipcMain.handle('inbox:getLabels', async () => handle(() => InboxRepository.getLabels()));
+
+  // ─── Inbox: Commands ─────────────────────────────────────────────────────────
+  ipcMain.handle('inbox:createEvidenceFromMessage', async (e, messageId, claimSummary, quote) =>
+    handle(() => InboxService.createEvidenceFromMessage(messageId, claimSummary, quote)));
+  ipcMain.handle('inbox:createEvidenceFromBrowserTab', async (e, tabId, url, title) =>
+    handle(() => InboxService.createEvidenceFromBrowserTab(tabId, url, title)));
+  ipcMain.handle('inbox:escalateMessage', async (e, messageId, reason) =>
+    handle(() => InboxService.escalateMessage(messageId, reason)));
+  ipcMain.handle('inbox:quarantineMessage', async (e, messageId, reason) =>
+    handle(() => InboxService.quarantineMessage(messageId, reason)));
+  ipcMain.handle('inbox:markThreadRead', async (e, threadId) =>
+    handle(() => InboxService.markThreadRead(threadId)));
+  ipcMain.handle('inbox:archiveThread', async (e, threadId) =>
+    handle(() => InboxService.archiveThread(threadId)));
+  ipcMain.handle('inbox:markMessageRead', async (e, messageId) =>
+    handle(() => InboxService.markMessageRead(messageId)));
+  ipcMain.handle('inbox:archiveMessage', async (e, messageId) =>
+    handle(() => InboxService.archiveMessage(messageId)));
+  ipcMain.handle('inbox:markMessageIgnored', async (e, messageId) =>
+    handle(() => InboxService.markMessageIgnored(messageId)));
+  ipcMain.handle('inbox:createLabel', async (e, name, color) =>
+    handle(() => InboxService.createLabel(name, color)));
+  ipcMain.handle('inbox:addLabelToMessage', async (e, messageId, labelId) =>
+    handle(() => InboxService.addLabelToMessage(messageId, labelId)));
+  ipcMain.handle('inbox:removeLabelFromMessage', async (e, messageId, labelId) =>
+    handle(() => InboxService.removeLabelFromMessage(messageId, labelId)));
+
+  // ─── CRM: Queries ────────────────────────────────────────────────────────────
+  ipcMain.handle('crm:getCompanies', async () => handle(() => CrmRepository.getCompanies()));
+  ipcMain.handle('crm:getCompanyDetail', async (e, companyId) => handle(() => CrmRepository.getCompanyDetail(companyId)));
+  ipcMain.handle('crm:getCompanyLinks', async (e, companyId) => handle(() => CrmRepository.getCompanyLinks(companyId)));
+  ipcMain.handle('crm:getContacts', async (e, companyId) => handle(async () =>
+    db.select().from(schema.contacts).where(eq(schema.contacts.companyId, companyId))
+  ));
+
+  // ─── CRM: Commands ───────────────────────────────────────────────────────────
+  ipcMain.handle('crm:createCompanyFromMessage', async (e, messageId) =>
+    handle(() => CrmService.createCompanyFromMessage(messageId), {
+      entityType: 'company',
+      entityId: (id) => id,
+      entryType: 'created',
+      message: (id) => `Company created from message ${messageId}`
+    }));
+  ipcMain.handle('crm:createContact', async (e, companyId, name, email, role) =>
+    handle(() => CrmService.createContact(companyId, name, email, role), {
+      entityType: 'contact',
+      entityId: (id) => id,
+      entryType: 'created',
+      message: `Contact "${name}" created`,
+      parentEntityType: 'company',
+      parentEntityId: companyId
+    }));
+  ipcMain.handle('crm:updateCompany', async (e, companyId, patch) =>
+    handle(() => CrmService.updateCompany(companyId, patch), {
+      entityType: 'company',
+      entityId: companyId,
+      entryType: 'updated',
+      message: `Company manual update: ${Object.keys(patch).join(', ')}`
+    }));
+  ipcMain.handle('crm:linkMessageToCompany', async (e, messageId, companyId) =>
+    handle(() => CrmService.linkMessageToCompany(messageId, companyId)));
+  ipcMain.handle('crm:linkBrowserTabToCompany', async (e, tabId, companyId, url) =>
+    handle(() => CrmService.linkBrowserTabToCompany(tabId, companyId, url), {
+      entityType: 'browser_tab',
+      entityId: tabId,
+      entryType: 'linked',
+      message: (res) => `Tab linked to company ${res.companyId}`,
+      parentEntityType: 'company',
+      parentEntityId: (res) => res.companyId
     }));
 
-    return enrichedThreads.filter(t => t.latestMsg);
-  });
+  // ─── Graph (360-View) ────────────────────────────────────────────────────────
+  ipcMain.handle('graph:getGraphContext', async (e, { entityType, entityId }) =>
+    handle(() => GraphRepository.getGraphContext(entityType, entityId)));
 
-  ipcMain.handle('inbox:getThreadContext', async (e, threadId: string) => {
-    const [thread] = await db.select().from(schema.threads).where(eq(schema.threads.id, threadId));
-    if (!thread) return null;
+  // ─── Links (Unified Graph) ──────────────────────────────────────────────────
+  ipcMain.handle('link:create', async (e, sourceType, sourceId, targetType, targetId, linkType, metadata) =>
+    handle(() => LinkService.createLink(sourceType, sourceId, targetType, targetId, linkType, metadata)));
+  ipcMain.handle('link:remove', async (e, linkId) =>
+    handle(() => LinkService.removeLink(linkId)));
+  ipcMain.handle('link:getForEntity', async (e, type, id) =>
+    handle(() => LinkService.getLinksForEntity(type, id)));
 
-    const messages = await db.select().from(schema.messages).where(eq(schema.messages.threadId, threadId)).orderBy(asc(schema.messages.receivedAt));
-    const msgIds = messages.map(m => m.id);
+  // ─── Tasks: Queries ──────────────────────────────────────────────────────────
+  ipcMain.handle('tasks:getTasks', async () => handle(() => TaskRepository.getTasks()));
+  ipcMain.handle('tasks:getTask', async (e, taskId) => handle(() => TaskRepository.getTask(taskId)));
 
-    // Linked Companies
-    const links = await db.select().from(schema.entityLinks).where(and(eq(schema.entityLinks.sourceType, 'message'), inArray(schema.entityLinks.sourceId, msgIds)));
-    const companyIds = [...new Set(links.filter(l => l.targetType === 'company').map(l => l.targetId))];
-    const companies = companyIds.length > 0 ? await db.select().from(schema.companies).where(inArray(schema.companies.id, companyIds)) : [];
+  // ─── Tasks: Commands ─────────────────────────────────────────────────────────
+  ipcMain.handle('tasks:createTask', async (e, opt) =>
+    handle(() => TaskService.createTask(opt.title, opt.type, opt.priority, opt)));
+  ipcMain.handle('tasks:updateTaskStatus', async (e, taskId, status) =>
+    handle(() => TaskService.updateTaskStatus(taskId, status), {
+      entityType: 'task',
+      entityId: taskId,
+      entryType: 'status_updated',
+      message: `Task status set to: ${status}`
+    }));
+  ipcMain.handle('tasks:updateTaskWorkflow', async (e, taskId, update) =>
+    handle(() => TaskService.updateTaskWorkflow(taskId, update)));
+  ipcMain.handle('tasks:appendNotebookEntryFromBrowserTab', async (e, tabId, message) =>
+    handle(() => TaskService.appendNotebookEntryFromBrowserTab(tabId, message)));
 
-    // Evidence
-    const evidence = msgIds.length > 0 ? await db.select().from(schema.evidenceFragments).where(inArray(schema.evidenceFragments.inboxMessageId, msgIds)) : [];
+  // ─── Outreach: Queries ───────────────────────────────────────────────────────
+  ipcMain.handle('outreach:getDrafts', async () => handle(() => OutreachRepository.getDrafts()));
+  ipcMain.handle('outreach:getDraft', async (e, draftId) => handle(() => OutreachRepository.getDraft(draftId)));
 
-    // Drafts
-    const drafts = await db.select().from(schema.drafts).where(eq(schema.drafts.linkedInboxThreadId, threadId));
+  // ─── Outreach: Commands ──────────────────────────────────────────────────────
+  ipcMain.handle('outreach:createDraftFromThread', async (e, threadId, subject, body) =>
+    handle(() => OutreachService.createDraftFromThread(threadId, subject, body)));
+  ipcMain.handle('outreach:createDraftFromCompany', async (e, companyId, subject, body) =>
+    handle(() => OutreachService.createDraftFromCompany(companyId, subject, body)));
+  ipcMain.handle('outreach:updateDraft', async (e, draftId, subject, body) =>
+    handle(() => OutreachService.updateDraft(draftId, subject, body)));
+  ipcMain.handle('outreach:approveDraft', async (e, draftId) =>
+    handle(() => OutreachService.approveDraft(draftId)));
+  ipcMain.handle('outreach:blockDraft', async (e, draftId, reason) =>
+    handle(() => OutreachService.blockDraft(draftId, reason)));
+  ipcMain.handle('outreach:retractDraft', async (e, draftId) =>
+    handle(() => OutreachService.retractDraft(draftId)));
+  ipcMain.handle('outreach:submitDraftForReview', async (e, draftId) =>
+    handle(() => OutreachService.submitDraftForReview(draftId)));
+  ipcMain.handle('outreach:resolveDraftBlocker', async (e, draftId, resolution) =>
+    handle(() => OutreachService.resolveDraftBlocker(draftId, resolution)));
+  ipcMain.handle('outreach:sendDraft', async (e, draftId: string) => handle(async () => {
+    if (!syncEngine) return { ok: false, error: { code: 'NOT_READY', message: 'Sync engine not initialized' } };
+    await syncEngine.sendDraft(draftId);
+    return { ok: true, data: null };
+  }));
 
-    // Message Labels
-    const labels = msgIds.length > 0 ? await db.select().from(schema.messageLabels).where(inArray(schema.messageLabels.messageId, msgIds)) : [];
+  // ─── Evidence ────────────────────────────────────────────────────────────────
+  ipcMain.handle('evidence:getFragments', async (e, filters) =>
+    handle(() => EvidenceRepository.getFragments(filters ?? {})));
+  ipcMain.handle('evidence:getFragment', async (e, fragmentId) =>
+    handle(() => EvidenceRepository.getFragment(fragmentId)));
+  ipcMain.handle('evidence:getPendingReview', async () =>
+    handle(() => EvidenceRepository.getPendingReview()));
+  ipcMain.handle('evidence:getContradicted', async () =>
+    handle(() => EvidenceRepository.getContradicted()));
 
-    return { thread, messages, companies, evidence, drafts, messageLabels: labels };
-  });
+  ipcMain.handle('evidence:createFragment', async (e, claimSummary, sourceType, sourceId, opts) =>
+    handle(() => EvidenceService.createFragment(claimSummary, sourceType, sourceId, opts)));
+  ipcMain.handle('evidence:review', async (e, fragmentId, status) =>
+    handle(() => EvidenceService.review(fragmentId, status)));
+  ipcMain.handle('evidence:setContradiction', async (e, fragmentId, contradicts, reason) =>
+    handle(() => EvidenceService.setContradiction(fragmentId, contradicts, reason)));
+  ipcMain.handle('evidence:updateConfidence', async (e, fragmentId, confidence) =>
+    handle(() => EvidenceService.updateConfidence(fragmentId, confidence)));
+  ipcMain.handle('evidence:updateClaim', async (e, fragmentId, claimSummary) =>
+    handle(() => EvidenceService.updateClaim(fragmentId, claimSummary)));
+  ipcMain.handle('evidence:delete', async (e, fragmentId: string) =>
+    handle(() => EvidenceService.deleteFragment(fragmentId)));
+  ipcMain.handle('evidence:linkToCompany', async (e, evidenceId, companyId) =>
+    handle(() => LinkService.createLink('evidence', evidenceId, 'company', companyId, 'evidence_for')));
+  ipcMain.handle('evidence:unlinkFromCompany', async (e, evidenceId, companyId) =>
+    handle(async () => {
+      const links = await LinkService.getLinksForEntity('evidence', evidenceId);
+      if (!links.ok) return links;
+      const targetLink = links.data.find(l => l.targetType === 'company' && l.targetId === companyId);
+      if (targetLink) return LinkService.removeLink(targetLink.id);
+      return { ok: true, data: null };
+    }));
 
-  ipcMain.handle('inbox:getMessageLabels', async () => {
-    return db.select().from(schema.messageLabels);
-  });
-
-  ipcMain.handle('inbox:getLabels', async () => {
-    return db.select().from(schema.labels);
-  });
-
-  // CRM
-  ipcMain.handle('crm:getCompanies', async () => {
-    return db.select().from(schema.companies).orderBy(desc(schema.companies.updatedAt));
-  });
-
-  ipcMain.handle('crm:getCompanyDetail', async (e, companyId: string) => {
-    const [company] = await db.select().from(schema.companies).where(eq(schema.companies.id, companyId));
-    return company;
-  });
-
-  ipcMain.handle('crm:getCompanyLinks', async (e, companyId: string) => {
-    return { 
-      messages: await db.select().from(schema.messages).where(eq(schema.messages.threadId, companyId)), // simplified
-      evidence: await db.select().from(schema.evidenceFragments).where(eq(schema.evidenceFragments.companyId, companyId)),
-      tasks: await db.select().from(schema.tasks).where(eq(schema.tasks.relatedEntityId, companyId)),
-      drafts: await db.select().from(schema.drafts).where(eq(schema.drafts.companyId, companyId)),
-      browserTabs: await db.select().from(schema.browserTabs).where(eq(schema.browserTabs.linkedCompanyId, companyId)),
-    };
-  });
-
-  // Tasks
-  ipcMain.handle('tasks:getTasks', async () => {
-    return db.select().from(schema.tasks).orderBy(desc(schema.tasks.createdAt));
-  });
-
-  // Outreach / Drafts
-  ipcMain.handle('outreach:getDrafts', async () => {
-    return db.select().from(schema.drafts).orderBy(desc(schema.drafts.createdAt));
-  });
-
-  // Notebook
-  ipcMain.handle('notebook:getEntries', async () => {
-    return db.select().from(schema.notebookEntries).orderBy(desc(schema.notebookEntries.createdAt));
-  });
-
-  // Evidence
-  ipcMain.handle('evidence:getFragments', async () => {
-    return db.select().from(schema.evidenceFragments).orderBy(desc(schema.evidenceFragments.timestamp));
-  });
-
+  // ─── Notebook / Audit ────────────────────────────────────────────────────────
+  ipcMain.handle('notebook:getEntries', async (e, filters) => handle(() => NotebookRepository.getEntries(filters)));
+  ipcMain.handle('audit:getCommandLog', async (e, entityId) => handle(() => NotebookRepository.getCommandLog(entityId)));
 
 }

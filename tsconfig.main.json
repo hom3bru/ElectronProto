@@ -17,6 +17,8 @@
   "include": [
     "main/**/*.ts", 
     "db/**/*.ts", 
+    "packages/services/**/*.ts", 
+    "packages/repositories/**/*.ts", 
     "packages/commands/**/*.ts", 
     "packages/shared/**/*.ts", 
     "shared/**/*.ts"
